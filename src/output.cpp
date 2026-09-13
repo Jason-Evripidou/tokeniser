@@ -39,8 +39,7 @@ namespace bpe
         }
         for (const TokenCount& token : results.tokens)
         {
-            out.write(reinterpret_cast<const char*>(token.token.data()),
-                    static_cast<std::streamsize>(token.token.size()));
+            out.write(reinterpret_cast<const char*>(token.token.data()), static_cast<std::streamsize>(token.token.size()));
             out << ' ' << token.count << '\n';
         }
         if (!out)
@@ -75,8 +74,7 @@ namespace bpe
     {
         for (const WordCount& entry : results.word_counts)
         {
-            std::cout.write(reinterpret_cast<const char*>(entry.word.data()),
-                            static_cast<std::streamsize>(entry.word.size()));
+            std::cout.write(reinterpret_cast<const char*>(entry.word.data()), static_cast<std::streamsize>(entry.word.size()));
             std::cout << ' ' << entry.count << '\n';
         }
 

@@ -82,8 +82,7 @@ namespace bpe
 
             const Results results = run_pipeline(input);
 
-            LOG(INFO) << "task 1: " << results.word_counts.size()
-                      << " distinct words; task 2: " << results.tokens.size() << " tokens";
+            LOG(INFO) << "task 1: " << results.word_counts.size() << " distinct words; task 2: " << results.tokens.size() << " tokens";
 
             const std::chrono::steady_clock::time_point t_save0 = std::chrono::steady_clock::now();
 
