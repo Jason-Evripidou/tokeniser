@@ -1,8 +1,10 @@
 // ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### //
 // Dependencies
 // ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### //
+// Internal header files.
 #include "bpe.h"
 
+// Standard library.
 #include <cstdint>
 #include <cstring>
 #include <fstream>

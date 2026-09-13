@@ -1,8 +1,10 @@
 // ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### //
 // Dependencies
 // ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### //
+// Internal header files.
 #include "md5.h"
 
+// Standard library.
 #include <cstdint>
 #include <cstring>
 #include <string>
