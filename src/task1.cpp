@@ -98,6 +98,7 @@ struct ChunkedEq {
     }
 };
 }
+
 // task1: count distinct words; a SWAR (SIMD Within A Register) trick finds each
 // word's end 8 bytes at a time.
 void task1(const std::vector<Word>& words, Results& results) {

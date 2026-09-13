@@ -1,56 +1,85 @@
+// ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### //
 #ifndef BPE_BPE_H_
 #define BPE_BPE_H_
+// ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### //
+
+
+// ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### //
+// Dependencies
+// ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### //
 #include <cstddef>
 #include <string>
 #include <vector>
-namespace bpe {
+// ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### //
 
-using Byte = unsigned char;
 
-struct WordCount {
-    std::vector<Byte> word;
-    std::size_t count = 0;
-};
+// ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### //
+namespace bpe
+{
 
-struct CharSplit {
-    std::vector<Byte> chars;
-    std::size_t count = 0;
-};
+    using Byte = unsigned char;
 
-struct TokenCount {
-    std::vector<Byte> token;
-    std::size_t count = 0;
-};
+    struct WordCount
+    {
+        std::vector<Byte> word;
+        std::size_t count = 0;
+    };
 
-struct Results {
-    std::vector<WordCount> word_counts;
-    std::vector<CharSplit> char_splits;
-    std::vector<TokenCount> tokens;
-};
+    struct CharSplit
+    {
+        std::vector<Byte> chars;
+        std::size_t count = 0;
+    };
 
-struct Word {
-    const Byte* bytes;
-};
+    struct TokenCount
+    {
+        std::vector<Byte> token;
+        std::size_t count = 0;
+    };
 
-void parallel_task1(std::vector<Byte>& input, Results& results);
+    struct Results
+    {
+        std::vector<WordCount> word_counts;
+        std::vector<CharSplit> char_splits;
+        std::vector<TokenCount> tokens;
+    };
 
-void parallel_task2(const std::vector<CharSplit>& splits, Results& results);
+    struct Word
+    {
+        const Byte* bytes;
+    };
 
-std::vector<Byte> read_file(const std::string& path);
+    void parallel_task1(std::vector<Byte>& input, Results& results);
 
-std::vector<Word> split_words(std::vector<Byte>& input);
+    void parallel_task2(const std::vector<CharSplit>& splits, Results& results);
 
-void task1(const std::vector<Word>& words, Results& results);
+    //---------------------------------------------------------------------------------------//
+    // Implementation: corpus.cpp
+    //---------------------------------------------------------------------------------------//
+    std::vector<Byte> read_file(const std::string& path);
 
-void task2(const std::vector<CharSplit>& splits, Results& results);
+    std::vector<Word> split_words(std::vector<Byte>& input);
+    //---------------------------------------------------------------------------------------//
 
-void write_output(const Results& results, const std::string& path);
+    void task1(const std::vector<Word>& words, Results& results);
 
-void print_task1(const Results& results);
+    void task2(const std::vector<CharSplit>& splits, Results& results);
 
-Results run_pipeline(std::vector<Byte>& input);
+    //---------------------------------------------------------------------------------------//
+    // Implementation: output.cpp
+    //---------------------------------------------------------------------------------------//
+    void write_output(const Results& results, const std::string& path);
 
-int run_cli(int argc, char** argv);
+    void print_task1(const Results& results);
+    //---------------------------------------------------------------------------------------//
+
+    Results run_pipeline(std::vector<Byte>& input);
+
+    int run_cli(int argc, char** argv);
 }
+// ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### //
 
+
+// ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### //
 #endif
+// ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### //
