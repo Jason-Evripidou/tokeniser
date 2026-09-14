@@ -1,28 +1,22 @@
 // ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### //
-#ifndef COUNT_SYSTEM_JOB_QUEUE_H
-#define COUNT_SYSTEM_JOB_QUEUE_H
+#ifndef COUNT_SYSTEM_TOTAL_JOBS_COUNTER_H
+#define COUNT_SYSTEM_TOTAL_JOBS_COUNTER_H
 // ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### //
 
 
 // ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### //
-// Internal header files.
-#include "count_system_job.h"
-
-// Standard library.
-#include <condition_variable>
 #include <mutex>
-#include <queue>
+#include <condition_variable>
 // ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### //
 
 
 // ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### //
-struct CountSystemJobQueue
+struct CountSystemTotalJobsCounter
 {
     //---------------------------------------------------------------------------------------//
     // Internal data.
     //---------------------------------------------------------------------------------------//
-    bool m_shutdown = false;
-    std::queue<CountSystemJob> m_queue;
+    size_t m_count;
 
     std::mutex m_mutex;
     std::condition_variable m_condition_variable;
@@ -31,38 +25,51 @@ struct CountSystemJobQueue
     //---------------------------------------------------------------------------------------//
     // Constructor and Destructor.
     //---------------------------------------------------------------------------------------//
-    CountSystemJobQueue() = default;
-    ~CountSystemJobQueue() = default;
+    CountSystemTotalJobsCounter()
+    :   m_count(0)
+    {}
 
-    inline void shutdown()
+    CountSystemTotalJobsCounter(int count)
+    :   m_count(count)
+    {}
+    //---------------------------------------------------------------------------------------//
+
+    //---------------------------------------------------------------------------------------//
+    // Increment and Decrement.
+    //---------------------------------------------------------------------------------------//
+    inline void resetCount()
     {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        m_count = 0;
+    }   
+    
+    inline void increment()
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        m_count++;
+    }
+
+    inline void decrement()
+    {
+        bool should_notify = false;
+
         {
             std::lock_guard<std::mutex> lock(m_mutex);
-            m_shutdown = true;
+            if(m_count > 0)  { m_count--; }
+            if(m_count == 0) { should_notify = true; }
         }
 
-        m_condition_variable.notify_all();
+        if(should_notify == true)
+        {
+            m_condition_variable.notify_all();
+        }
     }
     //---------------------------------------------------------------------------------------//
 
     //---------------------------------------------------------------------------------------//
-    // Insert and Retrieve jobs.
+    // Wait until counter reaches zero.
     //---------------------------------------------------------------------------------------//
-    inline bool insertCountSystemJob(const CountSystemJob& count_system_job)
-    {
-        {
-            std::lock_guard<std::mutex> lock(m_mutex);
-
-            if(m_shutdown) { return false; }
-
-            m_queue.push(count_system_job);
-        }
-        
-        m_condition_variable.notify_one();
-        return true;
-    }
-
-    inline bool getCountSystemJob(CountSystemJob& output)
+    inline void waitUntilZero()
     {
         std::unique_lock<std::mutex> lock(m_mutex);
 
@@ -71,16 +78,9 @@ struct CountSystemJobQueue
             lock,
             [this]()
             {
-                return m_shutdown || !m_queue.empty();
+                return (m_count == 0);
             }
         );
-
-        if(m_shutdown && m_queue.empty()) { return false; }
-
-        output = std::move(m_queue.front());
-        m_queue.pop();
-
-        return true;
     }
     //---------------------------------------------------------------------------------------//
 };

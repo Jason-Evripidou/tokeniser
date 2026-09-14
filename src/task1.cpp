@@ -4,7 +4,7 @@
 // Internal header files.
 #include "bpe.h"
 #include "absl/log/log.h"
-#include "task1_parallel/word_counts.h"
+#include "task1_parallel/count_system.h"
 
 // Standard library.
 #include <algorithm>
@@ -215,11 +215,15 @@ namespace bpe
         }
         ++end;
 
+        CountSystem count_system(words, 100, 10);
+        count_system.countWords();
+        /*
         WordCounts word_counts(words);
         for(const Word& word : words)
         {
             word_counts.incrementWordCount(word);
         }
+        */
         /*
         std::unordered_map<const Byte*, std::size_t, ChunkedHash, ChunkedEq> counts(0, ChunkedHash{end}, ChunkedEq{end});
         counts.reserve(words.size());
@@ -230,8 +234,8 @@ namespace bpe
         */
 
         std::vector<std::pair<const Byte*, std::size_t>> sorted;
-        sorted.reserve(word_counts.m_word_counts.size());
-        for (const auto& entry : word_counts.m_word_counts)
+        sorted.reserve(count_system.m_word_counts.m_word_counts.size());
+        for (const auto& entry : count_system.m_word_counts.m_word_counts)
         {
             sorted.emplace_back(entry.first, entry.second.getCount());
         }

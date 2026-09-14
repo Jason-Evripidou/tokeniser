@@ -5,6 +5,7 @@
 
 
 // ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### //
+// Standard library.
 #include <condition_variable>
 #include <mutex>
 #include <queue>
@@ -17,8 +18,8 @@ struct CountSystemJob
     //---------------------------------------------------------------------------------------//
     // Internal data.
     //---------------------------------------------------------------------------------------//
-    int m_start;
-    int m_end;
+    size_t m_start;
+    size_t m_end;
     //---------------------------------------------------------------------------------------//
 
     //---------------------------------------------------------------------------------------//
@@ -29,7 +30,7 @@ struct CountSystemJob
     ,   m_end(-1)
     {}
 
-    CountSystemJob(int start, int end)
+    CountSystemJob(size_t start, size_t end)
     :   m_start(start)
     ,   m_end(end)
     {}
@@ -51,6 +52,7 @@ struct CountSystemJob
             m_start = other.m_start;
             m_end = other.m_end;
         }
+        return *this;
     }
 
     CountSystemJob(CountSystemJob&& other) noexcept
