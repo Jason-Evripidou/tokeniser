@@ -1,43 +1,74 @@
 // ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### //
-#ifndef COUNT_SYSTEM_H
-#define COUNT_SYSTEM_H
+#ifndef COUNT_SYSTEM_JOB_H
+#define COUNT_SYSTEM_JOB_H
 // ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### //
 
 
 // ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### //
-// Internal header files.
-#include "../bpe.h"
-#include "count_system_job_queue.h"
-#include "word_counts.h"
+#include <condition_variable>
+#include <mutex>
+#include <queue>
 // ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### //
 
 
 // ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### //
-struct CountSystem
+struct CountSystemJob
 {
-    //---------------------------------------------------------------------------------------//
-    // External data. Must exist for lifetime of CountSystem object.
-    //---------------------------------------------------------------------------------------//
-    const std::vector<bpe::Word>& m_words;
-    //---------------------------------------------------------------------------------------//
-
     //---------------------------------------------------------------------------------------//
     // Internal data.
     //---------------------------------------------------------------------------------------//
-    WordCounts m_word_counts;
-    CountSystemJobQueue m_job_queue;
+    int m_start;
+    int m_end;
     //---------------------------------------------------------------------------------------//
 
     //---------------------------------------------------------------------------------------//
     // Constructor and Destructor.
     //---------------------------------------------------------------------------------------//
-    CountSystem(const std::vector<bpe::Word>& words)
-    :   m_words(words)
-    ,   m_word_counts(words)
-    {
-    }
+    CountSystemJob()
+    :   m_start(-1)
+    ,   m_end(-1)
+    {}
+
+    CountSystemJob(int start, int end)
+    :   m_start(start)
+    ,   m_end(end)
+    {}
     //---------------------------------------------------------------------------------------//
 
+    //---------------------------------------------------------------------------------------//
+    // Copy and Move constructors.
+    //---------------------------------------------------------------------------------------//
+    CountSystemJob(const CountSystemJob& other)
+    {
+        m_start = other.m_start;
+        m_end = other.m_end;
+    }
+
+    CountSystemJob& operator=(const CountSystemJob& other)
+    {
+        if(this != &other)
+        {
+            m_start = other.m_start;
+            m_end = other.m_end;
+        }
+    }
+
+    CountSystemJob(CountSystemJob&& other) noexcept
+    {
+        m_start = other.m_start;
+        m_end = other.m_end;
+    }
+
+    CountSystemJob& operator=(CountSystemJob&& other) noexcept
+    {
+        if(this != &other)
+        {
+            m_start = other.m_start;
+            m_end = other.m_end;
+        }
+        return *this;
+    }
+    //---------------------------------------------------------------------------------------//
 };
 // ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### //
 
