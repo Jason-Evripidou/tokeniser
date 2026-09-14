@@ -90,21 +90,11 @@ private:
     //---------------------------------------------------------------------------------------//
     /*
     -   Following code copied from task1.cpp:
-        -   Function: elapsed_ms()
         -   Function: hasless_any()
         -   struct ChunkedHash;
         -   struct ChunkedEq;
     */
     //---------------------------------------------------------------------------------------//
-    std::int64_t elapsed_ms
-    (
-        const std::chrono::steady_clock::time_point& start,
-        const std::chrono::steady_clock::time_point& end
-    )
-    {
-        return std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
-    }
-
     static constexpr std::uint64_t kOnes = ~0ULL / 255;
     static inline std::uint64_t hasless_any(std::uint64_t x, unsigned limit)
     {
@@ -112,21 +102,6 @@ private:
     }
 
     static inline std::uint64_t haszero(std::uint64_t x) { return hasless_any(x, 1); }
-
-    /*
-    struct ByteStrLess
-    {
-        bool operator()(const bpe::Byte* a, const bpe::Byte* b) const
-        {
-            std::size_t i = 0;
-            while (a[i] != 0 && a[i] == b[i])
-            {
-                ++i;
-            }
-            return a[i] < b[i];
-        }
-    };
-    */
 
     struct ChunkedHash
     {

@@ -4,6 +4,7 @@
 // Internal header files.
 #include "bpe.h"
 #include "absl/log/log.h"
+#include "task1/my_task_1.h"
 
 // Standard library.
 #include <chrono>
@@ -35,7 +36,8 @@ namespace bpe
 
         LOG(INFO) << "split words: " << elapsed_ms(t0, t1) << " ms";
         //task1(words, results);
-        task1_jason(words, results);
+        MyTask1 my_task_1;
+        my_task_1.my_task1(words, results);
     }
 
     void parallel_task2(const std::vector<CharSplit>& splits, Results& results)
