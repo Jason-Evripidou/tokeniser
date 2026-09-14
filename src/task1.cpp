@@ -4,6 +4,7 @@
 // Internal header files.
 #include "bpe.h"
 #include "absl/log/log.h"
+#include "task1_parallel/word_counts.h"
 
 // Standard library.
 #include <algorithm>
@@ -108,9 +109,7 @@ namespace bpe
                     if (z)
                     {
                         const std::size_t p = __builtin_ctzll(z) >> 3;
-                        const std::uint64_t mask =
-                            (p == 7) ? ~std::uint64_t{0}
-                                    : ((std::uint64_t{1} << (8 * (p + 1))) - 1);
+                        const std::uint64_t mask = (p == 7) ? ~std::uint64_t{0} : ((std::uint64_t{1} << (8 * (p + 1))) - 1);
                         return ((ca ^ cb) & mask) == 0;
                     }
                     if (ca != cb)
@@ -194,5 +193,75 @@ namespace bpe
         LOG(INFO) << "char split: " << elapsed_ms(t_wc1, t_cs1) << " ms";
     }
 
+    // task1: count distinct words; a SWAR (SIMD Within A Register) trick finds each
+    // word's end 8 bytes at a time.
+    void task1_jason(const std::vector<Word>& words, Results& results)
+    {
+        results.word_counts.clear();
+        results.char_splits.clear();
+
+        const std::chrono::steady_clock::time_point t_wc0 = std::chrono::steady_clock::now();
+
+        if (words.empty())
+        {
+            LOG(INFO) << "word count: 0 ms; char split: 0 ms";
+            return;
+        }
+
+        const Byte* end = words.back().bytes;
+        while (*end)
+        {
+            ++end;
+        }
+        ++end;
+
+        WordCounts word_counts(words);
+        for(const Word& word : words)
+        {
+            word_counts.incrementWordCount(word);
+        }
+        /*
+        std::unordered_map<const Byte*, std::size_t, ChunkedHash, ChunkedEq> counts(0, ChunkedHash{end}, ChunkedEq{end});
+        counts.reserve(words.size());
+        for (const Word& word : words)
+        {
+            ++counts[word.bytes];
+        }
+        */
+
+        std::vector<std::pair<const Byte*, std::size_t>> sorted;
+        sorted.reserve(word_counts.m_word_counts.size());
+        for (const auto& entry : word_counts.m_word_counts)
+        {
+            sorted.emplace_back(entry.first, entry.second.getCount());
+        }
+        std::sort
+        (
+            sorted.begin(),
+            sorted.end(),
+            [](const std::pair<const Byte*, std::size_t>& a, const std::pair<const Byte*, std::size_t>& b)
+            {
+                return ByteStrLess{}(a.first, b.first);
+            }
+        );
+
+        const std::chrono::steady_clock::time_point t_wc1 = std::chrono::steady_clock::now();
+
+        results.word_counts.reserve(sorted.size());
+        results.char_splits.reserve(sorted.size());
+        for (const auto& entry : sorted)
+        {
+            const Byte* s = entry.first;
+            const std::size_t n = std::strlen(reinterpret_cast<const char*>(s));
+            const std::vector<Byte> bytes(s, s + n);
+            results.word_counts.push_back(WordCount{bytes, entry.second});
+            results.char_splits.push_back(CharSplit{bytes, entry.second});
+        }
+
+        const std::chrono::steady_clock::time_point t_cs1 = std::chrono::steady_clock::now();
+
+        LOG(INFO) << "word count: " << elapsed_ms(t_wc0, t_wc1) << " ms";
+        LOG(INFO) << "char split: " << elapsed_ms(t_wc1, t_cs1) << " ms";
+    }
 }
 // ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### //
