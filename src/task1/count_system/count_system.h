@@ -6,7 +6,7 @@
 
 // ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### //
 // Internal header files.
-#include "../bpe.h"
+#include "../../bpe.h"
 #include "count_system_job.h"
 #include "count_system_job_queue.h"
 #include "count_system_total_jobs_counter.h"
@@ -31,7 +31,7 @@ struct CountSystem
     //---------------------------------------------------------------------------------------//
     // Internal data.
     //---------------------------------------------------------------------------------------//
-    size_t                                          m_chunk_size        ;
+    std::size_t                                     m_chunk_size        ;
     WordCounts                                      m_word_counts       ;
     CountSystemJobQueue                             m_job_queue         ;
     CountSystemTotalJobsCounter                     m_total_jobs_counter;
@@ -41,14 +41,14 @@ struct CountSystem
     //---------------------------------------------------------------------------------------//
     // Constructor and Destructor.
     //---------------------------------------------------------------------------------------//
-    CountSystem(const std::vector<bpe::Word>& words, size_t chunk_size, size_t num_workers)
+    CountSystem(const std::vector<bpe::Word>& words, std::size_t chunk_size, std::size_t num_workers)
     :   m_words(words)
     ,   m_chunk_size(chunk_size)
     ,   m_word_counts(words)
     ,   m_total_jobs_counter(0)
     {
         m_workers.reserve(num_workers);
-        for(size_t i = 0; i < num_workers; i++)
+        for(std::size_t i = 0; i < num_workers; i++)
         {
             m_workers.emplace_back
             (
@@ -67,11 +67,11 @@ struct CountSystem
     //---------------------------------------------------------------------------------------//
     inline void countWords()
     {
-        size_t index = 0;
+        std::size_t index = 0;
         while(index < m_words.size())
         {
-            size_t start_index = index;
-            size_t end_index   = index + m_chunk_size - 1;
+            std::size_t start_index = index;
+            std::size_t end_index   = index + m_chunk_size - 1;
 
             if(end_index >= m_words.size())
             {

@@ -5,6 +5,7 @@
 
 
 // ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### //
+// Standard library.
 #include <mutex>
 #include <condition_variable>
 // ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### //
@@ -16,7 +17,7 @@ struct CountSystemTotalJobsCounter
     //---------------------------------------------------------------------------------------//
     // Internal data.
     //---------------------------------------------------------------------------------------//
-    size_t m_count;
+    std::size_t m_count;
 
     std::mutex m_mutex;
     std::condition_variable m_condition_variable;

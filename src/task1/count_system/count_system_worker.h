@@ -6,7 +6,7 @@
 
 // ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### //
 // Internal header files.
-#include "../bpe.h"
+#include "../../bpe.h"
 #include "count_system_job.h"
 #include "count_system_job_queue.h"
 #include "count_system_total_jobs_counter.h"
@@ -21,7 +21,7 @@
 struct CountSystemWorker
 {
     //---------------------------------------------------------------------------------------//
-    // External data. Must exist for lifetime of CountSystem object.
+    // External data. Must exist for lifetime of CountSystemWorker object.
     //---------------------------------------------------------------------------------------//
     const std::vector<bpe::Word>& m_words             ;
     WordCounts&                   m_word_counts       ;
@@ -88,10 +88,10 @@ struct CountSystemWorker
         {
             if(m_job_queue.getCountSystemJob(count_system_job) == false) { break; }
 
-            size_t start_index = count_system_job.m_start;
-            size_t end_index   = count_system_job.m_end;
+            std::size_t start_index = count_system_job.m_start;
+            std::size_t end_index   = count_system_job.m_end;
 
-            for(size_t i = start_index; i <= end_index; i++)
+            for(std::size_t i = start_index; i <= end_index; i++)
             {
                 if(i >= m_words.size())
                 {

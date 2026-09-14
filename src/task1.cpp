@@ -4,7 +4,8 @@
 // Internal header files.
 #include "bpe.h"
 #include "absl/log/log.h"
-#include "task1_parallel/count_system.h"
+#include "task1/count_system/count_system.h"
+#include "task1/merge_sort_system/merge_sort_system.h"
 
 // Standard library.
 #include <algorithm>
@@ -200,68 +201,58 @@ namespace bpe
         results.word_counts.clear();
         results.char_splits.clear();
 
+        size_t num_count_system_workers = 16;
+        CountSystem count_system(words, words.size() / num_count_system_workers, num_count_system_workers);
+
+        MergeSortSystem merge_sort_system;
+
         const std::chrono::steady_clock::time_point t_wc0 = std::chrono::steady_clock::now();
 
-        if (words.empty())
+        if(words.empty())
         {
             LOG(INFO) << "word count: 0 ms; char split: 0 ms";
             return;
         }
 
-        const Byte* end = words.back().bytes;
-        while (*end)
-        {
-            ++end;
-        }
-        ++end;
-
-        CountSystem count_system(words, 100, 10);
+        //-----------------------------------------------------------------------------------//
+        // Task 1.1.1: Word frequency counting.
+        //-----------------------------------------------------------------------------------//
         count_system.countWords();
-        /*
-        WordCounts word_counts(words);
-        for(const Word& word : words)
-        {
-            word_counts.incrementWordCount(word);
-        }
-        */
-        /*
-        std::unordered_map<const Byte*, std::size_t, ChunkedHash, ChunkedEq> counts(0, ChunkedHash{end}, ChunkedEq{end});
-        counts.reserve(words.size());
-        for (const Word& word : words)
-        {
-            ++counts[word.bytes];
-        }
-        */
+        count_system.m_word_counts.printWordCounts(std::string("out_1_1_1_word_counts.txt"));
+        //-----------------------------------------------------------------------------------//
 
+        //-----------------------------------------------------------------------------------//
+        // Task 1.1.2: Sort Words.
+        //-----------------------------------------------------------------------------------//
         std::vector<std::pair<const Byte*, std::size_t>> sorted;
         sorted.reserve(count_system.m_word_counts.m_word_counts.size());
         for (const auto& entry : count_system.m_word_counts.m_word_counts)
         {
             sorted.emplace_back(entry.first, entry.second.getCount());
         }
-        std::sort
-        (
-            sorted.begin(),
-            sorted.end(),
-            [](const std::pair<const Byte*, std::size_t>& a, const std::pair<const Byte*, std::size_t>& b)
-            {
-                return ByteStrLess{}(a.first, b.first);
-            }
-        );
+        merge_sort_system.parallelMergeSort(sorted);
+        //-----------------------------------------------------------------------------------//
 
         const std::chrono::steady_clock::time_point t_wc1 = std::chrono::steady_clock::now();
 
-        results.word_counts.reserve(sorted.size());
-        results.char_splits.reserve(sorted.size());
-        for (const auto& entry : sorted)
+        //-----------------------------------------------------------------------------------//
+        // Task 1.2: Character splitting.
+        //-----------------------------------------------------------------------------------//
+        results.word_counts.resize(sorted.size());
+        results.char_splits.resize(sorted.size());
+
+        #pragma omp parallel for
+        for(std::size_t i = 0; i < sorted.size(); i++)
         {
+            const std::pair<const Byte*, std::size_t>& entry = sorted[i];
             const Byte* s = entry.first;
             const std::size_t n = std::strlen(reinterpret_cast<const char*>(s));
             const std::vector<Byte> bytes(s, s + n);
             results.word_counts.push_back(WordCount{bytes, entry.second});
             results.char_splits.push_back(CharSplit{bytes, entry.second});
         }
-
+        //-----------------------------------------------------------------------------------//
+        
         const std::chrono::steady_clock::time_point t_cs1 = std::chrono::steady_clock::now();
 
         LOG(INFO) << "word count: " << elapsed_ms(t_wc0, t_wc1) << " ms";
