@@ -132,6 +132,8 @@ namespace bpe
 
     // task1: count distinct words; a SWAR (SIMD Within A Register) trick finds each
     // word's end 8 bytes at a time.
+    /*
+    -   Original task1.
     void task1(const std::vector<Word>& words, Results& results)
     {
         results.word_counts.clear();
@@ -193,5 +195,72 @@ namespace bpe
         LOG(INFO) << "word count: " << elapsed_ms(t_wc0, t_wc1) << " ms";
         LOG(INFO) << "char split: " << elapsed_ms(t_wc1, t_cs1) << " ms";
     }
-}
+    */
+
+    void task1(const std::vector<bpe::Word>& words, bpe::Results& results)
+    {
+        results.word_counts.clear();
+        results.char_splits.clear();
+
+        if(words.empty())
+        {
+            LOG(INFO) << "word count: 0 ms; char split: 0 ms";
+            return;
+        }
+
+        size_t num_count_system_workers = 10;
+        size_t chunk_size = words.size() / num_count_system_workers;
+        if(chunk_size < 1) { chunk_size = 1; }
+        CountSystem count_system(words, chunk_size, num_count_system_workers);
+
+        MergeSortSystem merge_sort_system;
+
+        const std::chrono::steady_clock::time_point t_wc0 = std::chrono::steady_clock::now();
+
+        //-----------------------------------------------------------------------------------//
+        // Task 1.1.1: Word frequency counting.
+        //-----------------------------------------------------------------------------------//
+        count_system.countWords();
+        //count_system.m_word_counts.printWordCounts(std::string("out_1_1_1_word_counts.txt"));
+        //-----------------------------------------------------------------------------------//
+
+        //-----------------------------------------------------------------------------------//
+        // Task 1.1.2: Sort Words.
+        //-----------------------------------------------------------------------------------//
+        std::vector<std::pair<const bpe::Byte*, std::size_t>> sorted;
+        sorted.reserve(count_system.m_word_counts.m_word_counts.size());
+        for (const auto& entry : count_system.m_word_counts.m_word_counts)
+        {
+            sorted.emplace_back(entry.first, entry.second.getCount());
+        }
+        merge_sort_system.parallelMergeSort(sorted);
+        //merge_sort_system.printData(std::string("out_1_1_2_sorted_words.txt"), sorted);
+        //-----------------------------------------------------------------------------------//
+
+        const std::chrono::steady_clock::time_point t_wc1 = std::chrono::steady_clock::now();
+
+        //-----------------------------------------------------------------------------------//
+        // Task 1.2: Character splitting.
+        //-----------------------------------------------------------------------------------//
+        results.word_counts.resize(sorted.size());
+        results.char_splits.resize(sorted.size());
+
+        #pragma omp parallel for
+        for(std::size_t i = 0; i < sorted.size(); i++)
+        {
+            const std::pair<const bpe::Byte*, std::size_t>& entry = sorted[i];
+            const bpe::Byte* s = entry.first;
+            const std::size_t n = std::strlen(reinterpret_cast<const char*>(s));
+            const std::vector<bpe::Byte> bytes(s, s + n);
+            results.word_counts[i] = (bpe::WordCount{bytes, entry.second});
+            results.char_splits[i] = (bpe::CharSplit{bytes, entry.second});
+        }
+        //-----------------------------------------------------------------------------------//
+
+        const std::chrono::steady_clock::time_point t_cs1 = std::chrono::steady_clock::now();
+
+        LOG(INFO) << "word count: " << elapsed_ms(t_wc0, t_wc1) << " ms";
+        LOG(INFO) << "char split: " << elapsed_ms(t_wc1, t_cs1) << " ms";
+    }
+};
 // ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### //
