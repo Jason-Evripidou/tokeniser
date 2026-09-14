@@ -45,8 +45,7 @@ namespace bpe
             const std::size_t n = std::min<std::size_t>(left.size(), 8);
             for (; i < n; ++i)
             {
-                fingerprint |= static_cast<u64>(static_cast<u8>(left[i]))
-                            << (8 * (7 - i));
+                fingerprint |= static_cast<u64>(static_cast<u8>(left[i])) << (8 * (7 - i));
             }
             const std::size_t m = std::min<std::size_t>(right.size(), 8 - i);
             for (std::size_t j = 0; j < m; ++j, ++i)

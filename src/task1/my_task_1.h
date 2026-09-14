@@ -11,6 +11,9 @@
 #include "absl/log/log.h"
 #include "count_system/count_system.h"
 #include "merge_sort_system/merge_sort_system.h"
+
+// Standard library.
+#include <omp.h>
 // ##### ###### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### //
 
 
@@ -57,7 +60,7 @@ public:
         // Task 1.1.1: Word frequency counting.
         //-----------------------------------------------------------------------------------//
         count_system.countWords();
-        //count_system.m_word_counts.printWordCounts(std::string("out_1_1_1_word_counts.txt"));
+        count_system.m_word_counts.printWordCounts(std::string("out_1_1_1_word_counts.txt"));
         //-----------------------------------------------------------------------------------//
 
         //-----------------------------------------------------------------------------------//
@@ -70,6 +73,7 @@ public:
             sorted.emplace_back(entry.first, entry.second.getCount());
         }
         merge_sort_system.parallelMergeSort(sorted);
+        merge_sort_system.printData(std::string("out_1_1_2_sorted_words.txt"), sorted);
         //-----------------------------------------------------------------------------------//
 
         const std::chrono::steady_clock::time_point t_wc1 = std::chrono::steady_clock::now();
