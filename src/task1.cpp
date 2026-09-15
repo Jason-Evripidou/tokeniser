@@ -202,15 +202,19 @@ namespace bpe
         results.word_counts.clear();
         results.char_splits.clear();
 
-        if(words.empty())
+        std::size_t words_size = words.size();
+        if(words_size == static_cast<std::size_t>(0))
         {
             LOG(INFO) << "word count: 0 ms; char split: 0 ms";
             return;
         }
 
-        size_t num_count_system_workers = 10;
-        size_t chunk_size = words.size() / num_count_system_workers;
-        if(chunk_size < 1) { chunk_size = 1; }
+        std::size_t num_count_system_workers = static_cast<std::size_t>(10);
+        std::size_t chunk_size = words_size / num_count_system_workers;
+        if(chunk_size < static_cast<std::size_t>(1))
+        {
+            chunk_size = static_cast<std::size_t>(1);
+        }
         CountSystem count_system(words, chunk_size, num_count_system_workers);
 
         MergeSortSystem merge_sort_system;

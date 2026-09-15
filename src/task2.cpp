@@ -14,6 +14,9 @@
 #include <string>
 #include <utility>
 #include <vector>
+#include <array>
+
+#include <omp.h>
 // ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### //
 
 
@@ -55,6 +58,20 @@ namespace bpe
             return fingerprint;
         }
 
+        //-----------------------------------------------------------------------------------//
+        /*
+        -   pair_state represents a unique adjacent token pair.
+        -   key is compromised of two u32 token IDs. It defines the pair of tokens.
+        -   count is the total frequency of this pair across all words/tokens.
+        -   word_count is the number of distinct words/tokens containing the pair.
+        -   positions is the positions where this pair currently occurs across the globally
+        |   state.token array.
+        -   last_word cache of the token id of the last word/token for which this pair's group
+        |   was accessed.
+        -   last_group group ID corresponding to last_word.
+        -   fingerprint 64-bit representation of the pair's text.
+        */
+        //-----------------------------------------------------------------------------------//
         struct pair_state
         {
             u64 key = 0;
@@ -65,6 +82,7 @@ namespace bpe
             u32 last_group = no_position;
             u64 fingerprint = 0;
         };
+        //-----------------------------------------------------------------------------------//
 
         struct queue_entry
         {
@@ -478,6 +496,220 @@ namespace bpe
             state.right_state.assign(cache_size, no_position);
         }
 
+        //-----------------------------------------------------------------------------------//
+        // Optimised version.
+        //-----------------------------------------------------------------------------------//
+        void build_state_optimised(const std::vector<CharSplit>& splits, task2_state& state)
+        {
+            if (splits.size() >= no_position)
+            {
+                throw std::length_error("too many distinct words");
+            }
+
+            state.vocabulary.resize(byte_value_count);
+            state.token_count.assign(byte_value_count, 0);
+            for (u32 value = 1; value < byte_value_count; ++value)
+            {
+                state.vocabulary[value].assign(1, static_cast<char>(value));
+            }
+
+            //-------------------------------------------------------------------------------//
+            // Parallel building of token counts.
+            //-------------------------------------------------------------------------------//
+            std::vector<u32> word_start(splits.size());
+            std::size_t slot_count = 0;
+            for(std::size_t i = 0; i < splits.size(); i++)
+            {
+                word_start[i] = static_cast<u32>(slot_count);
+                slot_count += splits[i].chars.size() + 1;
+            }
+            if(slot_count >= no_position)
+            {
+                throw std::length_error("input has too many byte positions");
+            }
+
+            state.word_frequencies.resize(splits.size());
+            state.token.resize(slot_count);
+            state.previous.resize(slot_count);
+            state.next.resize(slot_count);
+            state.word_of.resize(slot_count);
+            state.edge_group.resize(slot_count);
+            state.alive.resize(slot_count);
+
+            // Do this check outside of parallel work.
+            for(const CharSplit& split : splits)
+            {
+                for(const Byte value : split.chars)
+                {
+                    if(value == 0)
+                    {
+                        throw std::invalid_argument("word contains a NUL byte");
+                    }
+                }
+            }
+
+            const int num_threads = omp_get_max_threads();
+            std::vector<std::array<u64, byte_value_count>> thread_token_counts(num_threads);
+            for(auto& counts : thread_token_counts)
+            {
+                counts.fill(0);
+            }
+
+            #pragma omp parallel
+            {
+                const int thread_index = omp_get_thread_num();
+                auto& local_counts = thread_token_counts[thread_index];
+
+                #pragma omp for
+                for(u32 word = 0; word < splits.size(); word++)
+                {
+                    const CharSplit& split = splits[word];
+
+                    state.word_frequencies[word] = split.count;
+                    const u32 first = word_start[word];
+
+                    for(std::size_t index = 0; index < split.chars.size(); index++)
+                    {
+                        const u32 position = first + static_cast<u32>(index);
+                        const u32 value = split.chars[index];
+
+                        state.token[position]       = value;
+                        state.previous[position]    = index == 0 ? no_position : position - 1;
+                        state.next[position]        = position + 1;
+                        state.word_of[position]     = word;
+                        state.edge_group[position]  = no_position;
+                        state.alive[position]       = 1;
+
+                        local_counts[value] += split.count;
+                    }
+
+                    const u32 sentinel = first + static_cast<u32>(split.chars.size());
+
+                    state.token[sentinel]      = 0;
+                    state.previous[sentinel]   = split.chars.empty() ? no_position : sentinel - 1;
+                    state.next[sentinel]       = no_position;
+                    state.word_of[sentinel]    = word;
+                    state.edge_group[sentinel] = no_position;
+                    state.alive[sentinel]      = 0;
+                }
+            }
+            state.token_count.assign(byte_value_count, 0);
+            for(int thread_index = 0; thread_index < num_threads; thread_index++)
+            {
+                for(u32 value = 0; value < byte_value_count; value++)
+                {
+                    state.token_count[value] += thread_token_counts[thread_index][value];
+                }
+            }
+            //-------------------------------------------------------------------------------//
+
+            //-------------------------------------------------------------------------------//
+            // Second parallel section.
+            //-------------------------------------------------------------------------------//
+            struct LocalPair
+            {
+                u32 left;
+                u32 right;
+                u32 word;
+                u32 position;
+                u64 frequency;
+            };
+
+            std::vector<std::vector<LocalPair>> thread_pairs(num_threads);
+
+            #pragma omp parallel
+            {
+                const int thread_index = omp_get_thread_num();
+                auto& local_pairs = thread_pairs[thread_index];
+
+                #pragma omp for
+                for(u32 word = 0; word < splits.size(); word++)
+                {
+                    const CharSplit& split = splits[word];
+
+                    if(split.chars.empty())
+                    {
+                        continue;
+                    }
+
+                    const u32 first = word_start[word];
+
+                    for(u32 position = first; is_live(state, position); position = state.next[position])
+                    {
+                        const u32 next_position = state.next[position];
+                        if(!is_live(state, next_position))
+                        {
+                            break;
+                        }
+
+                        const u32 left = state.token[position];
+                        const u32 right = state.token[next_position];
+
+                        local_pairs.push_back(LocalPair{left, right, word, position, split.count});
+                    }
+                }
+            }
+
+            std::vector<u32> initial_state(byte_value_count * byte_value_count, no_position);
+
+            // Number of elements is determined dynamically.
+            state.group_state.reserve(slot_count);
+            state.group_count.reserve(slot_count);
+
+            for(int thread_index = 0; thread_index < num_threads; thread_index++)
+            {
+                for(const LocalPair& local_pair : thread_pairs[thread_index])
+                {
+                    const u32 left     = local_pair.left    ;
+                    const u32 right    = local_pair.right   ;
+                    const u32 word     = local_pair.word    ;
+                    const u32 position = local_pair.position;
+
+                    u32& state_id = initial_state[left * byte_value_count + right];
+                    if(state_id == no_position)
+                    {
+                        state_id = create_pair_state(state, pack_pair(left, right));
+                    }
+
+                    pair_state& pair = state.pair_states[state_id];
+                    u32 group = no_position;
+
+                    if(pair.last_word == word)
+                    {
+                        group = pair.last_group;
+                    }
+                    else
+                    {
+                        group = static_cast<u32>(state.group_state.size());
+
+                        state.group_state.push_back(state_id);
+                        state.group_count.push_back(0);
+
+                        pair.last_word = word;
+                        pair.last_group = group;
+
+                        ++pair.word_count;
+                    }
+
+                    ++state.group_count[group];
+
+                    pair.count += local_pair.frequency;
+                    pair.positions.push_back(position);
+
+                    state.edge_group[position] = group;
+                }
+            }
+            //-------------------------------------------------------------------------------//
+
+            state.born_states.clear();
+            const std::size_t cache_size = state.vocabulary.size() + 1024;
+            state.left_stamp.assign(cache_size, no_position);
+            state.left_state.assign(cache_size, no_position);
+            state.right_stamp.assign(cache_size, no_position);
+            state.right_state.assign(cache_size, no_position);
+        }
+        //-----------------------------------------------------------------------------------//
+
         void run_merge_loop(task2_state& state)
         {
             queue_heap queue;
@@ -577,6 +809,137 @@ namespace bpe
             }
         }
 
+        //-----------------------------------------------------------------------------------//
+        // Optimised version.
+        //-----------------------------------------------------------------------------------//
+        void merge_positions
+        (
+            task2_state&      state       ,
+            std::vector<u32>& positions   ,
+            u32               left_token  ,
+            u32               right_token ,
+            u32               merged_token
+        )
+        {
+            //-------------------------------------------------------------------------------//
+            /*
+            std::vector<std::vector<u32>> positions_by_word;
+            positions_by_word.resize(state.word_frequencies.size());
+
+            for(u32 position : positions)
+            {
+                const u32 word = state.word_of[position];
+                positions_by_word[word].push_back(position);
+            }
+            */
+            //-------------------------------------------------------------------------------//
+
+            //for(std::vector<u32>& word_positions : positions_by_word)
+            //{
+                for(u32 position : positions)
+                {
+                    if(!pair_is_at(state, position, left_token, right_token)) { continue; }
+
+                    const u32 right_position = state.next[position];
+                    const u32 word = state.word_of[position];
+                    const u64 frequency = state.word_frequencies[word];
+
+                    const u32 left_position = state.previous[position];
+                    const u32 after_position = state.next[right_position];
+
+                    if(is_live(state, left_position))
+                    {
+                        remove_edge(state, left_position, frequency);
+                    }
+
+                    remove_edge(state, position, frequency);
+
+                    if(is_live(state, after_position))
+                    {
+                        remove_edge(state, right_position, frequency);
+                    }
+
+                    state.token_count[left_token]      -= frequency     ;
+                    state.token_count[right_token]     -= frequency     ;
+                    state.token_count[merged_token]    += frequency     ;
+
+                    state.token[position]               = merged_token  ;
+
+                    state.alive[right_position]         = 0             ;
+                    state.next[position]                = after_position;
+
+                    if(after_position != no_position)
+                    {
+                        state.previous[after_position]  = position      ;
+                    }
+                    
+                    state.previous[right_position]      = no_position   ;
+                    state.next[right_position]          = no_position   ;
+                    state.edge_group[right_position]    = no_position   ;
+
+                    if(is_live(state, left_position))
+                    {
+                        const u32 state_id = get_left_pair_state(state, state.token[left_position], merged_token);
+                        add_edge(state, left_position, state_id, word, frequency);
+                    }
+
+                    if(is_live(state, after_position))
+                    {
+                        const u32 state_id = get_right_pair_state(state, merged_token, state.token[after_position]);
+                        add_edge(state, position, state_id, word, frequency);
+                    }
+                }
+            //}
+        }
+        void run_merge_loop_optimised(task2_state& state)
+        {
+            queue_heap queue;
+            queue.comp.state = &state;
+            for (u32 state_id = 0; state_id < state.pair_states.size(); ++state_id)
+            {
+                const pair_state& pair = state.pair_states[state_id];
+                if (pair.word_count >= 2)
+                {
+                    queue.push(queue_entry{pair.count, pair.fingerprint, state_id});
+                }
+            }
+
+            for (;;)
+            {
+                const u32 best_state = pop_best_state(state, queue);
+                if(best_state == no_position)
+                {
+                    break;
+                }
+
+                const u64 best_key = state.pair_states[best_state].key;
+                std::vector<u32> positions = std::move(state.pair_states[best_state].positions);
+                const u32 left_token = pair_left(best_key);
+                const u32 right_token = pair_right(best_key);
+                const u32 merged_token = static_cast<u32>(state.vocabulary.size());
+
+                std::string merged_text;
+                merged_text.reserve(state.vocabulary[left_token].size() + state.vocabulary[right_token].size());
+                merged_text.append(state.vocabulary[left_token]);
+                merged_text.append(state.vocabulary[right_token]);
+                state.vocabulary.push_back(std::move(merged_text));
+                state.token_count.push_back(0);
+                if(state.left_stamp.size() <= merged_token)
+                {
+                    const std::size_t new_size = std::max<std::size_t>(state.left_stamp.size() * 2, merged_token + 1024);
+                    state.left_stamp.resize(new_size, no_position);
+                    state.left_state.resize(new_size, no_position);
+                    state.right_stamp.resize(new_size, no_position);
+                    state.right_state.resize(new_size, no_position);
+                }
+
+                merge_positions(state, positions, left_token, right_token, merged_token);
+
+                push_born_states(state, queue);
+            }
+        }
+        //-----------------------------------------------------------------------------------//
+
         void finalize_results(const task2_state& state, Results& results)
         {
             std::vector<u32> live_tokens;
@@ -613,15 +976,59 @@ namespace bpe
                 );
             }
         }
+
+        //-----------------------------------------------------------------------------------//
+        // Optimised version.
+        //-----------------------------------------------------------------------------------//
+        void finalize_results_optimised(const task2_state& state, Results& results)
+        {
+            std::vector<u32> live_tokens;
+            live_tokens.reserve(state.token_count.size());
+            for (u32 token_id = 1; token_id < state.token_count.size(); ++token_id)
+            {
+                if (state.token_count[token_id] != 0)
+                {
+                    live_tokens.push_back(token_id);
+                }
+            }
+            std::sort
+            (
+                live_tokens.begin(),
+                live_tokens.end(),
+                [&state](u32 left, u32 right)
+                {
+                    if (state.token_count[left] != state.token_count[right])
+                    {
+                        return state.token_count[left] > state.token_count[right];
+                    }
+                    return std::strcmp(state.vocabulary[left].c_str(), state.vocabulary[right].c_str()) < 0;
+                }
+            );
+
+            results.tokens.clear();
+            results.tokens.reserve(live_tokens.size());
+            for (u32 token_id : live_tokens)
+            {
+                const std::string& text = state.vocabulary[token_id];
+                results.tokens.push_back
+                (
+                    TokenCount{ std::vector<Byte>(text.begin(), text.end()), static_cast<std::size_t>(state.token_count[token_id]) }
+                );
+            }
+        }
+        //-----------------------------------------------------------------------------------//
     }
 
     // task2: greedy BPE — repeatedly merge the most frequent adjacent pair.
     void task2(const std::vector<CharSplit>& splits, Results& results)
     {
         task2_state state;
-        build_state(splits, state);
-        run_merge_loop(state);
-        finalize_results(state, results);
+        //build_state(splits, state);
+        build_state_optimised(splits, state);
+        //run_merge_loop(state);
+        run_merge_loop_optimised(state);
+        //finalize_results(state, results);
+        finalize_results_optimised(state, results);
     }
 }
 // ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### //
