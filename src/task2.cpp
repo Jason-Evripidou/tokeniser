@@ -4,6 +4,10 @@
 // Internal header files.
 #include "bpe.h"
 
+#include "task2/task2_defs.h"
+#include "task2/task2_build_state.h"
+#include "task2/task2_run_merge_loop.h"
+
 // Standard library.
 #include <algorithm>
 #include <cstdint>
@@ -25,373 +29,17 @@ namespace bpe
 {
     namespace
     {
-        using u8 = std::uint8_t;
-        using u32 = std::uint32_t;
-        using u64 = std::uint64_t;
-
-        constexpr u32 no_position = std::numeric_limits<u32>::max();
-        constexpr u32 byte_value_count = 256;
-
-        u64 pack_pair(u32 left, u32 right)
-        {
-            return (static_cast<u64>(left) << 32) | static_cast<u64>(right);
-        }
-
-        u32 pair_left(u64 key) { return static_cast<u32>(key >> 32); }
-
-        u32 pair_right(u64 key) { return static_cast<u32>(key); }
-
-        u64 text_fingerprint(const std::string& left, const std::string& right)
-        {
-            u64 fingerprint = 0;
-            std::size_t i = 0;
-            const std::size_t n = std::min<std::size_t>(left.size(), 8);
-            for (; i < n; ++i)
-            {
-                fingerprint |= static_cast<u64>(static_cast<u8>(left[i])) << (8 * (7 - i));
-            }
-            const std::size_t m = std::min<std::size_t>(right.size(), 8 - i);
-            for (std::size_t j = 0; j < m; ++j, ++i)
-            {
-                fingerprint |= static_cast<u64>(static_cast<u8>(right[j])) << (8 * (7 - i));
-            }
-            return fingerprint;
-        }
-
-        //-----------------------------------------------------------------------------------//
         /*
-        -   pair_state represents a unique adjacent token pair.
-        -   key is compromised of two u32 token IDs. It defines the pair of tokens.
-        -   count is the total frequency of this pair across all words/tokens.
-        -   word_count is the number of distinct words/tokens containing the pair.
-        -   positions is the positions where this pair currently occurs across the globally
-        |   state.token array.
-        -   last_word cache of the token id of the last word/token for which this pair's group
-        |   was accessed.
-        -   last_group group ID corresponding to last_word.
-        -   fingerprint 64-bit representation of the pair's text.
-        */
-        //-----------------------------------------------------------------------------------//
-        struct pair_state
+        void build_state(const std::vector<CharSplit>& splits, task2::task2_state& state)
         {
-            u64 key = 0;
-            u64 count = 0;
-            u32 word_count = 0;
-            std::vector<u32> positions;
-            u32 last_word = no_position;
-            u32 last_group = no_position;
-            u64 fingerprint = 0;
-        };
-        //-----------------------------------------------------------------------------------//
-
-        struct queue_entry
-        {
-            u64 count = 0;
-            u64 fingerprint = 0;
-            u32 state = 0;
-        };
-
-        struct task2_state;
-
-        struct queue_compare
-        {
-            const task2_state* state = nullptr;
-
-            bool operator()(const queue_entry& left, const queue_entry& right) const;
-        };
-
-        struct queue_heap
-        {
-            std::vector<queue_entry> data;
-            queue_compare comp;
-
-            bool empty() const { return data.empty(); }
-
-            const queue_entry& top() const { return data.front(); }
-
-            void push(queue_entry entry)
-            {
-                data.push_back(entry);
-                sift_up(data.size() - 1);
-            }
-
-            void pop()
-            {
-                data[0] = std::move(data.back());
-                data.pop_back();
-                if (!data.empty())
-                {
-                    sift_down(0);
-                }
-            }
-
-        private:
-            static std::size_t parent(std::size_t i) { return (i - 1) / 4; }
-            static std::size_t first_child(std::size_t i) { return 4 * i + 1; }
-
-            void sift_up(std::size_t i)
-            {
-                while (i > 0)
-                {
-                    const std::size_t p = parent(i);
-                    if (!comp(data[p], data[i]))
-                    {
-                        break;
-                    }
-                    std::swap(data[p], data[i]);
-                    i = p;
-                }
-            }
-
-            void sift_down(std::size_t i)
-            {
-                for (;;)
-                {
-                    const std::size_t fc = first_child(i);
-                    if (fc >= data.size())
-                    {
-                        break;
-                    }
-                    std::size_t best = fc;
-                    const std::size_t end = std::min(fc + 4, data.size());
-                    for (std::size_t c = fc + 1; c < end; ++c)
-                    {
-                        if (comp(data[best], data[c]))
-                        {
-                            best = c;
-                        }
-                    }
-                    if (!comp(data[i], data[best]))
-                    {
-                        break;
-                    }
-                    std::swap(data[i], data[best]);
-                    i = best;
-                }
-            }
-        };
-
-        struct task2_state
-        {
-            std::vector<u64> word_frequencies;
-            std::vector<u32> token;
-            std::vector<u32> previous;
-            std::vector<u32> next;
-            std::vector<u32> word_of;
-            std::vector<u32> edge_group;
-            std::vector<u8> alive;
-            std::vector<u64> token_count;
-            std::vector<std::string> vocabulary;
-            std::vector<pair_state> pair_states;
-            std::vector<u32> group_state;
-            std::vector<u32> group_count;
-            std::vector<u32> left_stamp;
-            std::vector<u32> left_state;
-            std::vector<u32> right_stamp;
-            std::vector<u32> right_state;
-            u32 same_stamp = no_position;
-            u32 same_state = no_position;
-            std::vector<u32> born_states;
-            // dead groups are reused; a dead group's group_count holds the next index
-            u32 free_head = no_position;
-        };
-
-        bool queue_compare::operator()(const queue_entry& left, const queue_entry& right) const
-        {
-            if (left.count != right.count)
-            {
-                return left.count < right.count;
-            }
-            if (left.fingerprint != right.fingerprint)
-            {
-                return left.fingerprint > right.fingerprint;
-            }
-            const pair_state& a = state->pair_states[left.state];
-            const pair_state& b = state->pair_states[right.state];
-            const std::string left_text = state->vocabulary[pair_left(a.key)] + state->vocabulary[pair_right(a.key)];
-            const std::string right_text = state->vocabulary[pair_left(b.key)] + state->vocabulary[pair_right(b.key)];
-            return std::strcmp(left_text.c_str(), right_text.c_str()) > 0;
-        }
-
-        bool is_live(const task2_state& state, u32 position)
-        {
-            return position != no_position && state.alive[position] != 0;
-        }
-
-        u32 create_pair_state(task2_state& state, u64 key)
-        {
-            const u32 state_id = static_cast<u32>(state.pair_states.size());
-            state.pair_states.push_back(pair_state{});
-            pair_state& pair = state.pair_states.back();
-            pair.key = key;
-            pair.fingerprint = text_fingerprint(state.vocabulary[pair_left(key)], state.vocabulary[pair_right(key)]);
-            state.born_states.push_back(state_id);
-            return state_id;
-        }
-
-        u32 get_left_pair_state(task2_state& state, u32 left, u32 merged)
-        {
-            if (left == merged)
-            {
-                if (state.same_stamp != merged)
-                {
-                    state.same_stamp = merged;
-                    state.same_state = create_pair_state(state, pack_pair(merged, merged));
-                }
-                return state.same_state;
-            }
-            if (state.left_stamp[left] != merged)
-            {
-                state.left_stamp[left] = merged;
-                state.left_state[left] = create_pair_state(state, pack_pair(left, merged));
-            }
-            return state.left_state[left];
-        }
-
-        u32 get_right_pair_state(task2_state& state, u32 merged, u32 right)
-        {
-            if (right == merged)
-            {
-                if (state.same_stamp != merged)
-                {
-                    state.same_stamp = merged;
-                    state.same_state = create_pair_state(state, pack_pair(merged, merged));
-                }
-                return state.same_state;
-            }
-            if (state.right_stamp[right] != merged)
-            {
-                state.right_stamp[right] = merged;
-                state.right_state[right] = create_pair_state(state, pack_pair(merged, right));
-            }
-            return state.right_state[right];
-        }
-
-        u32 get_word_group(task2_state& state, u32 state_id, u32 word)
-        {
-            pair_state& pair = state.pair_states[state_id];
-            if (pair.last_word == word)
-            {
-                return pair.last_group;
-            }
-            u32 group;
-            if (state.free_head != no_position)
-            {
-                group = state.free_head;
-                state.free_head = state.group_count[group];
-                state.group_count[group] = 0;
-                state.group_state[group] = state_id;
-            }
-            else
-            {
-                group = static_cast<u32>(state.group_state.size());
-                state.group_state.push_back(state_id);
-                state.group_count.push_back(0);
-            }
-            pair.last_word = word;
-            pair.last_group = group;
-            return group;
-        }
-
-        void remove_edge(task2_state& state, u32 start, u64 frequency)
-        {
-            const u32 group = state.edge_group[start];
-            if (group == no_position || state.group_count[group] == 0)
-            {
-                std::abort();
-            }
-            pair_state& pair = state.pair_states[state.group_state[group]];
-            --state.group_count[group];
-            if (pair.count < frequency)
-            {
-                std::abort();
-            }
-            pair.count -= frequency;
-            if (state.group_count[group] == 0)
-            {
-                if (pair.word_count == 0)
-                {
-                    std::abort();
-                }
-                --pair.word_count;
-                if (pair.last_group == group)
-                {
-                    pair.last_group = no_position;
-                    pair.last_word = no_position;
-                }
-                state.group_count[group] = state.free_head;
-                state.free_head = group;
-            }
-            state.edge_group[start] = no_position;
-        }
-
-        void add_edge(task2_state& state, u32 start, u32 state_id, u32 word, u64 frequency)
-        {
-            const u32 group = get_word_group(state, state_id, word);
-            pair_state& pair = state.pair_states[state_id];
-            if (state.group_count[group]++ == 0)
-            {
-                ++pair.word_count;
-            }
-            pair.count += frequency;
-            pair.positions.push_back(start);
-            state.edge_group[start] = group;
-        }
-
-        bool pair_is_at(const task2_state& state, u32 position, u32 left, u32 right)
-        {
-            if (!is_live(state, position) || state.token[position] != left)
-            {
-                return false;
-            }
-            const u32 next_position = state.next[position];
-            return is_live(state, next_position) && state.token[next_position] == right;
-        }
-
-        void push_born_states(task2_state& state, queue_heap& queue)
-        {
-            for (u32 state_id : state.born_states)
-            {
-                const pair_state& pair = state.pair_states[state_id];
-                if (pair.word_count >= 2 && pair.count != 0)
-                {
-                    queue.push(queue_entry{pair.count, pair.fingerprint, state_id});
-                }
-            }
-            state.born_states.clear();
-        }
-
-        u32 pop_best_state(task2_state& state, queue_heap& queue)
-        {
-            while (!queue.empty())
-            {
-                const queue_entry entry = queue.top();
-                queue.pop();
-                const pair_state& pair = state.pair_states[entry.state];
-                if (pair.word_count < 2 || pair.count == 0)
-                {
-                    continue;
-                }
-                if (entry.count != pair.count)
-                {
-                    queue.push(queue_entry{pair.count, pair.fingerprint, entry.state});
-                    continue;
-                }
-                return entry.state;
-            }
-            return no_position;
-        }
-
-        void build_state(const std::vector<CharSplit>& splits, task2_state& state)
-        {
-            if (splits.size() >= no_position)
+            if (splits.size() >= task2::no_position)
             {
                 throw std::length_error("too many distinct words");
             }
 
-            state.vocabulary.resize(byte_value_count);
-            state.token_count.assign(byte_value_count, 0);
-            for (u32 value = 1; value < byte_value_count; ++value)
+            state.vocabulary.resize(task2::byte_value_count);
+            state.token_count.assign(task2::byte_value_count, 0);
+            for (task2::u32 value = 1; value < task2::byte_value_count; ++value)
             {
                 state.vocabulary[value].assign(1, static_cast<char>(value));
             }
@@ -402,7 +50,7 @@ namespace bpe
             {
                 slot_count += split.chars.size() + 1;
             }
-            if (slot_count >= no_position)
+            if (slot_count >= task2::no_position)
             {
                 throw std::length_error("input has too many byte positions");
             }
@@ -415,66 +63,66 @@ namespace bpe
             state.group_state.reserve(slot_count);
             state.group_count.reserve(slot_count);
 
-            std::vector<u32> initial_state(byte_value_count * byte_value_count, no_position);
-            for (u32 word = 0; word < splits.size(); ++word)
+            std::vector<task2::u32> initial_state(task2::byte_value_count * task2::byte_value_count, task2::no_position);
+            for (task2::u32 word = 0; word < splits.size(); ++word)
             {
                 const CharSplit& split = splits[word];
                 state.word_frequencies.push_back(split.count);
-                const u32 first = static_cast<u32>(state.token.size());
+                const task2::u32 first = static_cast<task2::u32>(state.token.size());
 
                 for (std::size_t index = 0; index < split.chars.size(); ++index)
                 {
-                    const u32 position = static_cast<u32>(state.token.size());
-                    const u32 value = split.chars[index];
+                    const task2::u32 position = static_cast<task2::u32>(state.token.size());
+                    const task2::u32 value = split.chars[index];
                     if (value == 0)
                     {
                         throw std::invalid_argument("word contains a NUL byte");
                     }
                     state.token.push_back(value);
-                    state.previous.push_back(index == 0 ? no_position : position - 1);
+                    state.previous.push_back(index == 0 ? task2::no_position : position - 1);
                     state.next.push_back(position + 1);
                     state.word_of.push_back(word);
-                    state.edge_group.push_back(no_position);
+                    state.edge_group.push_back(task2::no_position);
                     state.alive.push_back(1);
                     state.token_count[value] += split.count;
                 }
 
-                const u32 sentinel = static_cast<u32>(state.token.size());
+                const task2::u32 sentinel = static_cast<task2::u32>(state.token.size());
                 state.token.push_back(0);
-                state.previous.push_back(split.chars.empty() ? no_position : sentinel - 1);
-                state.next.push_back(no_position);
+                state.previous.push_back(split.chars.empty() ? task2::no_position : sentinel - 1);
+                state.next.push_back(task2::no_position);
                 state.word_of.push_back(word);
-                state.edge_group.push_back(no_position);
+                state.edge_group.push_back(task2::no_position);
                 state.alive.push_back(0);
 
                 if (split.chars.empty())
                 {
                     continue;
                 }
-                for (u32 position = first; is_live(state, position); position = state.next[position])
+                for (task2::u32 position = first; is_live(state, position); position = state.next[position])
                 {
-                    const u32 next_position = state.next[position];
+                    const task2::u32 next_position = state.next[position];
                     if (!is_live(state, next_position))
                     {
                         break;
                     }
-                    const u32 left = state.token[position];
-                    const u32 right = state.token[next_position];
-                    u32& state_id = initial_state[left * byte_value_count + right];
-                    if (state_id == no_position)
+                    const task2::u32 left = state.token[position];
+                    const task2::u32 right = state.token[next_position];
+                    task2::u32& state_id = initial_state[left * task2::byte_value_count + right];
+                    if (state_id == task2::no_position)
                     {
-                        state_id = create_pair_state(state, pack_pair(left, right));
+                        state_id = create_pair_state(state, task2::pack_pair(left, right));
                     }
 
-                    pair_state& pair = state.pair_states[state_id];
-                    u32 group = no_position;
+                    task2::pair_state& pair = state.pair_states[state_id];
+                    task2::u32 group = task2::no_position;
                     if (pair.last_word == word)
                     {
                         group = pair.last_group;
                     }
                     else
                     {
-                        group = static_cast<u32>(state.group_state.size());
+                        group = static_cast<task2::u32>(state.group_state.size());
                         state.group_state.push_back(state_id);
                         state.group_count.push_back(0);
                         pair.last_word = word;
@@ -490,252 +138,39 @@ namespace bpe
 
             state.born_states.clear();
             const std::size_t cache_size = state.vocabulary.size() + 1024;
-            state.left_stamp.assign(cache_size, no_position);
-            state.left_state.assign(cache_size, no_position);
-            state.right_stamp.assign(cache_size, no_position);
-            state.right_state.assign(cache_size, no_position);
+            state.left_stamp.assign(cache_size, task2::no_position);
+            state.left_state.assign(cache_size, task2::no_position);
+            state.right_stamp.assign(cache_size, task2::no_position);
+            state.right_state.assign(cache_size, task2::no_position);
         }
+        */
 
-        //-----------------------------------------------------------------------------------//
-        // Optimised version.
-        //-----------------------------------------------------------------------------------//
-        void build_state_optimised(const std::vector<CharSplit>& splits, task2_state& state)
+        void run_merge_loop(task2::task2_state& state)
         {
-            if (splits.size() >= no_position)
-            {
-                throw std::length_error("too many distinct words");
-            }
-
-            state.vocabulary.resize(byte_value_count);
-            state.token_count.assign(byte_value_count, 0);
-            for (u32 value = 1; value < byte_value_count; ++value)
-            {
-                state.vocabulary[value].assign(1, static_cast<char>(value));
-            }
-
-            //-------------------------------------------------------------------------------//
-            // Parallel building of token counts.
-            //-------------------------------------------------------------------------------//
-            std::vector<u32> word_start(splits.size());
-            std::size_t slot_count = 0;
-            for(std::size_t i = 0; i < splits.size(); i++)
-            {
-                word_start[i] = static_cast<u32>(slot_count);
-                slot_count += splits[i].chars.size() + 1;
-            }
-            if(slot_count >= no_position)
-            {
-                throw std::length_error("input has too many byte positions");
-            }
-
-            state.word_frequencies.resize(splits.size());
-            state.token.resize(slot_count);
-            state.previous.resize(slot_count);
-            state.next.resize(slot_count);
-            state.word_of.resize(slot_count);
-            state.edge_group.resize(slot_count);
-            state.alive.resize(slot_count);
-
-            // Do this check outside of parallel work.
-            for(const CharSplit& split : splits)
-            {
-                for(const Byte value : split.chars)
-                {
-                    if(value == 0)
-                    {
-                        throw std::invalid_argument("word contains a NUL byte");
-                    }
-                }
-            }
-
-            const int num_threads = omp_get_max_threads();
-            std::vector<std::array<u64, byte_value_count>> thread_token_counts(num_threads);
-            for(auto& counts : thread_token_counts)
-            {
-                counts.fill(0);
-            }
-
-            #pragma omp parallel
-            {
-                const int thread_index = omp_get_thread_num();
-                auto& local_counts = thread_token_counts[thread_index];
-
-                #pragma omp for
-                for(u32 word = 0; word < splits.size(); word++)
-                {
-                    const CharSplit& split = splits[word];
-
-                    state.word_frequencies[word] = split.count;
-                    const u32 first = word_start[word];
-
-                    for(std::size_t index = 0; index < split.chars.size(); index++)
-                    {
-                        const u32 position = first + static_cast<u32>(index);
-                        const u32 value = split.chars[index];
-
-                        state.token[position]       = value;
-                        state.previous[position]    = index == 0 ? no_position : position - 1;
-                        state.next[position]        = position + 1;
-                        state.word_of[position]     = word;
-                        state.edge_group[position]  = no_position;
-                        state.alive[position]       = 1;
-
-                        local_counts[value] += split.count;
-                    }
-
-                    const u32 sentinel = first + static_cast<u32>(split.chars.size());
-
-                    state.token[sentinel]      = 0;
-                    state.previous[sentinel]   = split.chars.empty() ? no_position : sentinel - 1;
-                    state.next[sentinel]       = no_position;
-                    state.word_of[sentinel]    = word;
-                    state.edge_group[sentinel] = no_position;
-                    state.alive[sentinel]      = 0;
-                }
-            }
-            state.token_count.assign(byte_value_count, 0);
-            for(int thread_index = 0; thread_index < num_threads; thread_index++)
-            {
-                for(u32 value = 0; value < byte_value_count; value++)
-                {
-                    state.token_count[value] += thread_token_counts[thread_index][value];
-                }
-            }
-            //-------------------------------------------------------------------------------//
-
-            //-------------------------------------------------------------------------------//
-            // Second parallel section.
-            //-------------------------------------------------------------------------------//
-            struct LocalPair
-            {
-                u32 left;
-                u32 right;
-                u32 word;
-                u32 position;
-                u64 frequency;
-            };
-
-            std::vector<std::vector<LocalPair>> thread_pairs(num_threads);
-
-            #pragma omp parallel
-            {
-                const int thread_index = omp_get_thread_num();
-                auto& local_pairs = thread_pairs[thread_index];
-
-                #pragma omp for
-                for(u32 word = 0; word < splits.size(); word++)
-                {
-                    const CharSplit& split = splits[word];
-
-                    if(split.chars.empty())
-                    {
-                        continue;
-                    }
-
-                    const u32 first = word_start[word];
-
-                    for(u32 position = first; is_live(state, position); position = state.next[position])
-                    {
-                        const u32 next_position = state.next[position];
-                        if(!is_live(state, next_position))
-                        {
-                            break;
-                        }
-
-                        const u32 left = state.token[position];
-                        const u32 right = state.token[next_position];
-
-                        local_pairs.push_back(LocalPair{left, right, word, position, split.count});
-                    }
-                }
-            }
-
-            std::vector<u32> initial_state(byte_value_count * byte_value_count, no_position);
-
-            // Number of elements is determined dynamically.
-            state.group_state.reserve(slot_count);
-            state.group_count.reserve(slot_count);
-
-            for(int thread_index = 0; thread_index < num_threads; thread_index++)
-            {
-                for(const LocalPair& local_pair : thread_pairs[thread_index])
-                {
-                    const u32 left     = local_pair.left    ;
-                    const u32 right    = local_pair.right   ;
-                    const u32 word     = local_pair.word    ;
-                    const u32 position = local_pair.position;
-
-                    u32& state_id = initial_state[left * byte_value_count + right];
-                    if(state_id == no_position)
-                    {
-                        state_id = create_pair_state(state, pack_pair(left, right));
-                    }
-
-                    pair_state& pair = state.pair_states[state_id];
-                    u32 group = no_position;
-
-                    if(pair.last_word == word)
-                    {
-                        group = pair.last_group;
-                    }
-                    else
-                    {
-                        group = static_cast<u32>(state.group_state.size());
-
-                        state.group_state.push_back(state_id);
-                        state.group_count.push_back(0);
-
-                        pair.last_word = word;
-                        pair.last_group = group;
-
-                        ++pair.word_count;
-                    }
-
-                    ++state.group_count[group];
-
-                    pair.count += local_pair.frequency;
-                    pair.positions.push_back(position);
-
-                    state.edge_group[position] = group;
-                }
-            }
-            //-------------------------------------------------------------------------------//
-
-            state.born_states.clear();
-            const std::size_t cache_size = state.vocabulary.size() + 1024;
-            state.left_stamp.assign(cache_size, no_position);
-            state.left_state.assign(cache_size, no_position);
-            state.right_stamp.assign(cache_size, no_position);
-            state.right_state.assign(cache_size, no_position);
-        }
-        //-----------------------------------------------------------------------------------//
-
-        void run_merge_loop(task2_state& state)
-        {
-            queue_heap queue;
+            task2::queue_heap queue;
             queue.comp.state = &state;
-            for (u32 state_id = 0; state_id < state.pair_states.size(); ++state_id)
+            for (task2::u32 state_id = 0; state_id < state.pair_states.size(); ++state_id)
             {
-                const pair_state& pair = state.pair_states[state_id];
+                const task2::pair_state& pair = state.pair_states[state_id];
                 if (pair.word_count >= 2)
                 {
-                    queue.push(queue_entry{pair.count, pair.fingerprint, state_id});
+                    queue.push(task2::queue_entry{pair.count, pair.fingerprint, state_id});
                 }
             }
 
             for (;;)
             {
-                const u32 best_state = pop_best_state(state, queue);
-                if (best_state == no_position)
+                const task2::u32 best_state = pop_best_state(state, queue);
+                if (best_state == task2::no_position)
                 {
                     break;
                 }
 
-                const u64 best_key = state.pair_states[best_state].key;
-                std::vector<u32> positions = std::move(state.pair_states[best_state].positions);
-                const u32 left_token = pair_left(best_key);
-                const u32 right_token = pair_right(best_key);
-                const u32 merged_token = static_cast<u32>(state.vocabulary.size());
+                const task2::u64 best_key = state.pair_states[best_state].key;
+                std::vector<task2::u32> positions = std::move(state.pair_states[best_state].positions);
+                const task2::u32 left_token = task2::pair_left(best_key);
+                const task2::u32 right_token = task2::pair_right(best_key);
+                const task2::u32 merged_token = static_cast<task2::u32>(state.vocabulary.size());
 
                 std::string merged_text;
                 merged_text.reserve(state.vocabulary[left_token].size() + state.vocabulary[right_token].size());
@@ -746,29 +181,29 @@ namespace bpe
                 if (state.left_stamp.size() <= merged_token)
                 {
                     const std::size_t new_size = std::max<std::size_t>(state.left_stamp.size() * 2, merged_token + 1024);
-                    state.left_stamp.resize(new_size, no_position);
-                    state.left_state.resize(new_size, no_position);
-                    state.right_stamp.resize(new_size, no_position);
-                    state.right_state.resize(new_size, no_position);
+                    state.left_stamp.resize(new_size, task2::no_position);
+                    state.left_state.resize(new_size, task2::no_position);
+                    state.right_stamp.resize(new_size, task2::no_position);
+                    state.right_state.resize(new_size, task2::no_position);
                 }
 
-                u32 current_word = no_position;
-                u64 frequency = 0;
-                for (u32 position : positions)
+                task2::u32 current_word = task2::no_position;
+                task2::u64 frequency = 0;
+                for (task2::u32 position : positions)
                 {
                     if (!pair_is_at(state, position, left_token, right_token))
                     {
                         continue;
                     }
-                    const u32 right_position = state.next[position];
-                    const u32 word = state.word_of[position];
+                    const task2::u32 right_position = state.next[position];
+                    const task2::u32 word = state.word_of[position];
                     if (word != current_word)
                     {
                         current_word = word;
                         frequency = state.word_frequencies[word];
                     }
-                    const u32 left_position = state.previous[position];
-                    const u32 after_position = state.next[right_position];
+                    const task2::u32 left_position = state.previous[position];
+                    const task2::u32 after_position = state.next[right_position];
 
                     if (is_live(state, left_position))
                     {
@@ -786,22 +221,22 @@ namespace bpe
                     state.token[position] = merged_token;
                     state.alive[right_position] = 0;
                     state.next[position] = after_position;
-                    if (after_position != no_position)
+                    if (after_position != task2::no_position)
                     {
                         state.previous[after_position] = position;
                     }
-                    state.previous[right_position] = no_position;
-                    state.next[right_position] = no_position;
-                    state.edge_group[right_position] = no_position;
+                    state.previous[right_position] = task2::no_position;
+                    state.next[right_position] = task2::no_position;
+                    state.edge_group[right_position] = task2::no_position;
 
                     if (is_live(state, left_position))
                     {
-                        const u32 state_id = get_left_pair_state(state, state.token[left_position], merged_token);
+                        const task2::u32 state_id = get_left_pair_state(state, state.token[left_position], merged_token);
                         add_edge(state, left_position, state_id, word, frequency);
                     }
                     if (is_live(state, after_position))
                     {
-                        const u32 state_id = get_right_pair_state(state, merged_token, state.token[after_position]);
+                        const task2::u32 state_id = get_right_pair_state(state, merged_token, state.token[after_position]);
                         add_edge(state, position, state_id, word, frequency);
                     }
                 }
@@ -812,6 +247,7 @@ namespace bpe
         //-----------------------------------------------------------------------------------//
         // Optimised version.
         //-----------------------------------------------------------------------------------//
+        /*
         void merge_positions
         (
             task2_state&      state       ,
@@ -822,7 +258,6 @@ namespace bpe
         )
         {
             //-------------------------------------------------------------------------------//
-            /*
             std::vector<std::vector<u32>> positions_by_word;
             positions_by_word.resize(state.word_frequencies.size());
 
@@ -831,7 +266,6 @@ namespace bpe
                 const u32 word = state.word_of[position];
                 positions_by_word[word].push_back(position);
             }
-            */
             //-------------------------------------------------------------------------------//
 
             //for(std::vector<u32>& word_positions : positions_by_word)
@@ -938,13 +372,14 @@ namespace bpe
                 push_born_states(state, queue);
             }
         }
+        */
         //-----------------------------------------------------------------------------------//
 
-        void finalize_results(const task2_state& state, Results& results)
+        void finalize_results(const task2::task2_state& state, bpe::Results& results)
         {
-            std::vector<u32> live_tokens;
+            std::vector<task2::u32> live_tokens;
             live_tokens.reserve(state.token_count.size());
-            for (u32 token_id = 1; token_id < state.token_count.size(); ++token_id)
+            for (task2::u32 token_id = 1; token_id < state.token_count.size(); ++token_id)
             {
                 if (state.token_count[token_id] != 0)
                 {
@@ -955,7 +390,7 @@ namespace bpe
             (
                 live_tokens.begin(),
                 live_tokens.end(),
-                [&state](u32 left, u32 right)
+                [&state](task2::u32 left, task2::u32 right)
                 {
                     if (state.token_count[left] != state.token_count[right])
                     {
@@ -967,68 +402,28 @@ namespace bpe
 
             results.tokens.clear();
             results.tokens.reserve(live_tokens.size());
-            for (u32 token_id : live_tokens)
+            for (task2::u32 token_id : live_tokens)
             {
                 const std::string& text = state.vocabulary[token_id];
                 results.tokens.push_back
                 (
-                    TokenCount{ std::vector<Byte>(text.begin(), text.end()), static_cast<std::size_t>(state.token_count[token_id]) }
+                    bpe::TokenCount{ std::vector<bpe::Byte>(text.begin(), text.end()), static_cast<std::size_t>(state.token_count[token_id]) }
                 );
             }
         }
-
-        //-----------------------------------------------------------------------------------//
-        // Optimised version.
-        //-----------------------------------------------------------------------------------//
-        void finalize_results_optimised(const task2_state& state, Results& results)
-        {
-            std::vector<u32> live_tokens;
-            live_tokens.reserve(state.token_count.size());
-            for (u32 token_id = 1; token_id < state.token_count.size(); ++token_id)
-            {
-                if (state.token_count[token_id] != 0)
-                {
-                    live_tokens.push_back(token_id);
-                }
-            }
-            std::sort
-            (
-                live_tokens.begin(),
-                live_tokens.end(),
-                [&state](u32 left, u32 right)
-                {
-                    if (state.token_count[left] != state.token_count[right])
-                    {
-                        return state.token_count[left] > state.token_count[right];
-                    }
-                    return std::strcmp(state.vocabulary[left].c_str(), state.vocabulary[right].c_str()) < 0;
-                }
-            );
-
-            results.tokens.clear();
-            results.tokens.reserve(live_tokens.size());
-            for (u32 token_id : live_tokens)
-            {
-                const std::string& text = state.vocabulary[token_id];
-                results.tokens.push_back
-                (
-                    TokenCount{ std::vector<Byte>(text.begin(), text.end()), static_cast<std::size_t>(state.token_count[token_id]) }
-                );
-            }
-        }
-        //-----------------------------------------------------------------------------------//
     }
 
     // task2: greedy BPE — repeatedly merge the most frequent adjacent pair.
     void task2(const std::vector<CharSplit>& splits, Results& results)
     {
-        task2_state state;
-        //build_state(splits, state);
-        build_state_optimised(splits, state);
-        //run_merge_loop(state);
-        run_merge_loop_optimised(state);
-        //finalize_results(state, results);
-        finalize_results_optimised(state, results);
+        task2::task2_state state;
+
+        BuildState build_state;
+        build_state.build_state(splits, state);
+        
+        run_merge_loop(state);
+        
+        finalize_results(state, results);
     }
 }
 // ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### //
