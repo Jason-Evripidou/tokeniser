@@ -10,6 +10,7 @@
 #include "task2_defs.h"
 
 // Third party.
+#include <omp.h>
 
 // Standard library.
 #include <iostream>
@@ -54,6 +55,10 @@ struct PairCount
 struct Merge
 {
     //---------------------------------------------------------------------------------------//
+    std::vector<std::unordered_map<Pair, PairCount, PairHash>> m_thread_pairs;
+    //---------------------------------------------------------------------------------------//
+
+    //---------------------------------------------------------------------------------------//
     std::vector<std::vector<task2::u32>> m_words;
 
     std::vector<std::string> m_vocabulary;
@@ -66,6 +71,9 @@ struct Merge
     //---------------------------------------------------------------------------------------//
     Merge(const task2::task2_state& state)
     {
+        const int num_threads = omp_get_max_threads();
+        m_thread_pairs.resize(num_threads);
+
         m_words.resize(state.word_frequencies.size());
         m_vocabulary = state.vocabulary;
         m_word_frequencies = state.word_frequencies;
@@ -122,6 +130,58 @@ struct Merge
                 {
                     pair_count.word_count++;
                 }
+            }
+        }
+    }
+    //---------------------------------------------------------------------------------------//
+
+    //---------------------------------------------------------------------------------------//
+    void createPairsParallel()
+    {
+        m_pairs.clear();
+
+        for(std::unordered_map<Pair, PairCount, PairHash>& pairs : m_thread_pairs)
+        {
+            pairs.clear();
+        }
+
+        #pragma omp parallel
+        {
+            const int thread_id = omp_get_thread_num();
+            std::unordered_map<Pair, PairCount, PairHash>& local_pairs = m_thread_pairs[thread_id];
+
+            #pragma omp for
+            for(task2::u32 word = 0; word < m_words.size(); word++)
+            {
+                std::unordered_set<Pair, PairHash> word_pairs;
+
+                for(task2::u32 position = 0; position + 1 < m_words[word].size(); position++)
+                {
+                    Pair pair;
+                    pair.key = pack_pair(m_words[word][position], m_words[word][position + 1]);
+
+                    PairCount& pair_count = local_pairs[pair];
+                    pair_count.count += m_word_frequencies[word];
+
+                    if(word_pairs.insert(pair).second)
+                    {
+                        pair_count.word_count++;
+                    }
+                }
+            }
+        }
+
+        for(const std::unordered_map<Pair, PairCount, PairHash>& local_pairs : m_thread_pairs)
+        {
+            for(const auto& entry : local_pairs)
+            {
+                const Pair& pair = entry.first;
+                const PairCount& pair_count = entry.second;
+
+                PairCount& total = m_pairs[pair];
+
+                total.count      += pair_count.count;
+                total.word_count += pair_count.word_count;
             }
         }
     }
@@ -220,7 +280,8 @@ struct Merge
     {
         while(true)
         {
-            createPairs();
+            //createPairs();
+            createPairsParallel();
             Pair best_pair;
             if(!selectBestPair(best_pair)) { break; }
             mergePair(best_pair);
