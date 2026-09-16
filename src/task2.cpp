@@ -29,6 +29,9 @@ namespace bpe
 {
     namespace
     {
+        //-----------------------------------------------------------------------------------//
+        // Original build_state.
+        //-----------------------------------------------------------------------------------//
         /*
         void build_state(const std::vector<CharSplit>& splits, task2::task2_state& state)
         {
@@ -144,7 +147,12 @@ namespace bpe
             state.right_state.assign(cache_size, task2::no_position);
         }
         */
+        //-----------------------------------------------------------------------------------//
 
+        //-----------------------------------------------------------------------------------//
+        // Original run_merge_loop.
+        //-----------------------------------------------------------------------------------//
+        /*
         void run_merge_loop(task2::task2_state& state)
         {
             task2::queue_heap queue;
@@ -243,138 +251,13 @@ namespace bpe
                 push_born_states(state, queue);
             }
         }
-
-        //-----------------------------------------------------------------------------------//
-        // Optimised version.
-        //-----------------------------------------------------------------------------------//
-        /*
-        void merge_positions
-        (
-            task2_state&      state       ,
-            std::vector<u32>& positions   ,
-            u32               left_token  ,
-            u32               right_token ,
-            u32               merged_token
-        )
-        {
-            //-------------------------------------------------------------------------------//
-            std::vector<std::vector<u32>> positions_by_word;
-            positions_by_word.resize(state.word_frequencies.size());
-
-            for(u32 position : positions)
-            {
-                const u32 word = state.word_of[position];
-                positions_by_word[word].push_back(position);
-            }
-            //-------------------------------------------------------------------------------//
-
-            //for(std::vector<u32>& word_positions : positions_by_word)
-            //{
-                for(u32 position : positions)
-                {
-                    if(!pair_is_at(state, position, left_token, right_token)) { continue; }
-
-                    const u32 right_position = state.next[position];
-                    const u32 word = state.word_of[position];
-                    const u64 frequency = state.word_frequencies[word];
-
-                    const u32 left_position = state.previous[position];
-                    const u32 after_position = state.next[right_position];
-
-                    if(is_live(state, left_position))
-                    {
-                        remove_edge(state, left_position, frequency);
-                    }
-
-                    remove_edge(state, position, frequency);
-
-                    if(is_live(state, after_position))
-                    {
-                        remove_edge(state, right_position, frequency);
-                    }
-
-                    state.token_count[left_token]      -= frequency     ;
-                    state.token_count[right_token]     -= frequency     ;
-                    state.token_count[merged_token]    += frequency     ;
-
-                    state.token[position]               = merged_token  ;
-
-                    state.alive[right_position]         = 0             ;
-                    state.next[position]                = after_position;
-
-                    if(after_position != no_position)
-                    {
-                        state.previous[after_position]  = position      ;
-                    }
-                    
-                    state.previous[right_position]      = no_position   ;
-                    state.next[right_position]          = no_position   ;
-                    state.edge_group[right_position]    = no_position   ;
-
-                    if(is_live(state, left_position))
-                    {
-                        const u32 state_id = get_left_pair_state(state, state.token[left_position], merged_token);
-                        add_edge(state, left_position, state_id, word, frequency);
-                    }
-
-                    if(is_live(state, after_position))
-                    {
-                        const u32 state_id = get_right_pair_state(state, merged_token, state.token[after_position]);
-                        add_edge(state, position, state_id, word, frequency);
-                    }
-                }
-            //}
-        }
-        void run_merge_loop_optimised(task2_state& state)
-        {
-            queue_heap queue;
-            queue.comp.state = &state;
-            for (u32 state_id = 0; state_id < state.pair_states.size(); ++state_id)
-            {
-                const pair_state& pair = state.pair_states[state_id];
-                if (pair.word_count >= 2)
-                {
-                    queue.push(queue_entry{pair.count, pair.fingerprint, state_id});
-                }
-            }
-
-            for (;;)
-            {
-                const u32 best_state = pop_best_state(state, queue);
-                if(best_state == no_position)
-                {
-                    break;
-                }
-
-                const u64 best_key = state.pair_states[best_state].key;
-                std::vector<u32> positions = std::move(state.pair_states[best_state].positions);
-                const u32 left_token = pair_left(best_key);
-                const u32 right_token = pair_right(best_key);
-                const u32 merged_token = static_cast<u32>(state.vocabulary.size());
-
-                std::string merged_text;
-                merged_text.reserve(state.vocabulary[left_token].size() + state.vocabulary[right_token].size());
-                merged_text.append(state.vocabulary[left_token]);
-                merged_text.append(state.vocabulary[right_token]);
-                state.vocabulary.push_back(std::move(merged_text));
-                state.token_count.push_back(0);
-                if(state.left_stamp.size() <= merged_token)
-                {
-                    const std::size_t new_size = std::max<std::size_t>(state.left_stamp.size() * 2, merged_token + 1024);
-                    state.left_stamp.resize(new_size, no_position);
-                    state.left_state.resize(new_size, no_position);
-                    state.right_stamp.resize(new_size, no_position);
-                    state.right_state.resize(new_size, no_position);
-                }
-
-                merge_positions(state, positions, left_token, right_token, merged_token);
-
-                push_born_states(state, queue);
-            }
-        }
         */
         //-----------------------------------------------------------------------------------//
 
+        //-----------------------------------------------------------------------------------//
+        // Original finalize_results.
+        //-----------------------------------------------------------------------------------//
+        /*
         void finalize_results(const task2::task2_state& state, bpe::Results& results)
         {
             std::vector<task2::u32> live_tokens;
@@ -411,6 +294,86 @@ namespace bpe
                 );
             }
         }
+        */
+        //-----------------------------------------------------------------------------------//
+
+        //---------------------------------------------------------------------------------------//
+        void finalize_results(const Merge& merge, bpe::Results& results)
+        {
+            std::vector<task2::u64> token_count(merge.m_vocabulary.size(), 0);
+
+            //-----------------------------------------------------------------------------------//
+            // Calculate final token counts.
+            //-----------------------------------------------------------------------------------//
+            for(task2::u32 word = 0; word < merge.m_words.size(); word++)
+            {
+                for(task2::u32 token : merge.m_words[word])
+                {
+                    token_count[token] += merge.m_word_frequencies[word];
+                }
+            }
+            //-----------------------------------------------------------------------------------//
+
+            //-----------------------------------------------------------------------------------//
+            // Find tokens that actually occur.
+            //-----------------------------------------------------------------------------------//
+            std::vector<task2::u32> live_tokens;
+            live_tokens.reserve(token_count.size());
+
+            for(task2::u32 token_id = 0; token_id < token_count.size(); token_id++)
+            {
+                if(token_count[token_id] != 0)
+                {
+                    live_tokens.push_back(token_id);
+                }
+            }
+            //-----------------------------------------------------------------------------------//
+
+            //-----------------------------------------------------------------------------------//
+            // Sort by decreasing count, then lexicographically.
+            //-----------------------------------------------------------------------------------//
+            std::sort
+            (
+                live_tokens.begin(),
+                live_tokens.end(),
+                [&merge, &token_count](task2::u32 left, task2::u32 right)
+                {
+                    if(token_count[left] != token_count[right])
+                    {
+                        return token_count[left] > token_count[right];
+                    }
+
+                    return std::strcmp
+                    (
+                        merge.m_vocabulary[left].c_str(),
+                        merge.m_vocabulary[right].c_str()
+                    ) < 0;
+                }
+            );
+            //-----------------------------------------------------------------------------------//
+
+            //-----------------------------------------------------------------------------------//
+            // Create results.
+            //-----------------------------------------------------------------------------------//
+            results.tokens.clear();
+            results.tokens.reserve(live_tokens.size());
+
+            for(task2::u32 token_id : live_tokens)
+            {
+                const std::string& text = merge.m_vocabulary[token_id];
+
+                results.tokens.push_back
+                (
+                    bpe::TokenCount
+                    {
+                        std::vector<bpe::Byte>(text.begin(), text.end()),
+                        static_cast<std::size_t>(token_count[token_id])
+                    }
+                );
+            }
+            //-----------------------------------------------------------------------------------//
+        }
+        //---------------------------------------------------------------------------------------//
     }
 
     // task2: greedy BPE — repeatedly merge the most frequent adjacent pair.
@@ -421,9 +384,10 @@ namespace bpe
         BuildState build_state;
         build_state.build_state(splits, state);
         
-        run_merge_loop(state);
-        
-        finalize_results(state, results);
+        Merge merge(state);
+        merge.run();
+
+        finalize_results(merge, results);
     }
 }
 // ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### //
