@@ -15,6 +15,8 @@
 #include <cstring>
 #include <unordered_map>
 #include <utility>
+
+#include <omp.h>
 // ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### //
 
 
@@ -278,10 +280,10 @@ namespace bpe
         // Task 1.1.2: Sort Words.
         //-----------------------------------------------------------------------------------//
         std::vector<std::pair<const bpe::Byte*, std::size_t>> sorted;
-        sorted.reserve(count_system.m_word_counts.m_word_counts.size());
-        for (const auto& entry : count_system.m_word_counts.m_word_counts)
+        sorted.reserve(counts.size());
+        for (const auto& entry : counts)
         {
-            sorted.emplace_back(entry.first, entry.second.getCount());
+            sorted.emplace_back(entry.first, entry.second);
         }
         merge_sort_system.parallelMergeSort(sorted);
         //merge_sort_system.printData(std::string("out_1_1_2_sorted_words.txt"), sorted);
