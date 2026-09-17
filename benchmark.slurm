@@ -3,8 +3,8 @@
 #SBATCH --job-name=bpe-benchmark
 #SBATCH --partition=sapphire
 #SBATCH --cpus-per-task=32
-#SBATCH --time=00:01:00
-#SBATCH --mem=1G
+#SBATCH --time=00:30:00
+#SBATCH --mem=20G
 
 set -euo pipefail
 

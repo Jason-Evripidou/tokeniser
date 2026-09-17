@@ -109,5 +109,3 @@ against them. You are allowed to add new logging statements for debugging, but d
     - <code>make</code>
     - Assuming the test file folder is located at <code>/data/gpfs/projects/punim0520/2026/project1/</code>, the final command is:
         - <code>sbatch benchmark.slurm /data/gpfs/projects/punim0520/2026/project1/1G.txt</code>
-
-## Acknowledgements
