@@ -99,7 +99,18 @@ Add your readme content below.
 - Student ID: 992741
 
 ## Instructions
-To be filled by you.
+- Run <code>make clean</code> to remove previous build files.
+- Run <code>make</code> to compile the project.
+- Submit the benchmark job to Spartan using <code>sbatch benchmark.slurm [input_file]</code>
+    - <code>10M.txt</code>
+    - <code>100M.txt</code>
+    - <code>1G.txt</code>
+    - <code>4G.txt</code>
+
+- For example:
+    - <code>make clean</code>
+    - <code>make</code>
+    - Assuming the test file folder is located at <code>/data/gpfs/projects/punim0520/2026/project1/</code>, the final command is:
+        - <code>sbatch benchmark.slurm /data/gpfs/projects/punim0520/2026/project1/1G.txt</code>
 
 ## Acknowledgements
-To be filled by you.
