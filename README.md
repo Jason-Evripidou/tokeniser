@@ -89,9 +89,6 @@ against them. You are allowed to add new logging statements for debugging, but d
 - You are allowed to show your ideas, thoughts, designs, and results on [Ed](https://edstem.org/au/courses/38370/discussion) to get feedback or help others. However, ***you are never allowed to share any of your code anywhere; doing so will result you (and any other who submitted any part of your code) zero marks of this assignment.***.
 
 
--------
-Add your readme content below.
--------
 
 ## Authorship
 - Student Name: Jason Evripidou
