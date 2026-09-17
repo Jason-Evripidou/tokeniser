@@ -94,9 +94,9 @@ Add your readme content below.
 -------
 
 ## Authorship
-- Student Name: John Doe
-- Login ID: johndoe
-- Student ID: 12345678
+- Student Name: Jason Evripidou
+- Login ID: jevripidou
+- Student ID: 992741
 
 ## Instructions
 To be filled by you.
