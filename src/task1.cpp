@@ -209,6 +209,16 @@ namespace bpe
             return;
         }
 
+        const Byte* end = words.back().bytes;
+        while (*end)
+        {
+            ++end;
+        }
+        ++end;
+
+        //-----------------------------------------------------------------------------------//
+        // Superceeded.
+        //-----------------------------------------------------------------------------------//
         std::size_t num_count_system_workers = static_cast<std::size_t>(10);
         std::size_t chunk_size = words_size / num_count_system_workers;
         if(chunk_size < static_cast<std::size_t>(1))
@@ -216,6 +226,7 @@ namespace bpe
             chunk_size = static_cast<std::size_t>(1);
         }
         CountSystem count_system(words, chunk_size, num_count_system_workers);
+        //-----------------------------------------------------------------------------------//
 
         MergeSortSystem merge_sort_system;
 
@@ -224,8 +235,43 @@ namespace bpe
         //-----------------------------------------------------------------------------------//
         // Task 1.1.1: Word frequency counting.
         //-----------------------------------------------------------------------------------//
-        count_system.countWords();
+        //count_system.countWords();
         //count_system.m_word_counts.printWordCounts(std::string("out_1_1_1_word_counts.txt"));
+
+        const int num_threads = omp_get_max_threads();
+        std::vector<std::unordered_map<const Byte*, std::size_t, ChunkedHash, ChunkedEq>> thread_counts;
+        thread_counts.reserve(num_threads);
+
+        for(int i = 0; i < num_threads; i++)
+        {
+            thread_counts.emplace_back(0, ChunkedHash{end}, ChunkedEq{end});
+        }
+
+        #pragma omp parallel
+        {
+            const int thread_id = omp_get_thread_num();
+
+            auto& local_counts = thread_counts[thread_id];
+
+            local_counts.reserve(words.size() / num_threads + 1);
+
+            #pragma omp for
+            for(std::size_t i = 0; i < words.size(); i++)
+            {
+                ++local_counts[words[i].bytes];
+            }
+        }
+
+        std::unordered_map<const Byte*, std::size_t, ChunkedHash, ChunkedEq> counts(0, ChunkedHash{end}, ChunkedEq{end});
+        counts.reserve(words.size());
+
+        for(const auto& local_counts : thread_counts)
+        {
+            for(const auto& entry : local_counts)
+            {
+                counts[entry.first] += entry.second;
+            }
+        }
         //-----------------------------------------------------------------------------------//
 
         //-----------------------------------------------------------------------------------//

@@ -63,9 +63,9 @@ struct Merge
 
     std::vector<std::string> m_vocabulary;
 
-    std::unordered_map<Pair, PairCount, PairHash> m_pairs;
-
     std::vector<task2::u64> m_word_frequencies;
+
+    std::unordered_map<Pair, PairCount, PairHash> m_pairs;
     //---------------------------------------------------------------------------------------//
 
     //---------------------------------------------------------------------------------------//
@@ -75,8 +75,8 @@ struct Merge
         m_thread_pairs.resize(num_threads);
 
         m_words.resize(state.word_frequencies.size());
-        m_vocabulary = state.vocabulary;
-        m_word_frequencies = state.word_frequencies;
+        m_vocabulary = std::move(state.vocabulary);
+        m_word_frequencies = std::move(state.word_frequencies);
 
         for(task2::u32 word = 0; word < state.word_frequencies.size(); word++)
         {
@@ -251,7 +251,48 @@ struct Merge
             std::vector<task2::u32> new_word;
             new_word.reserve(word.size());
 
-            for(task2::u32 position = 0; position < word.size();)
+            for(task2::u32 position = 0; position < word.size(); )
+            {
+                if
+                (
+                    (position + 1 < word.size())  &&
+                    (word[position] == left)      &&
+                    (word[position + 1] == right)
+                )
+                {
+                    new_word.push_back(merged_token);
+                    position += 2;
+                }
+                else
+                {
+                    new_word.push_back(word[position]);
+                    position++;
+                }
+            }
+
+            word = std::move(new_word);
+        }
+    }
+    //---------------------------------------------------------------------------------------//
+
+    //---------------------------------------------------------------------------------------//
+    void mergePairParallel(const Pair& pair)
+    {
+        task2::u32 left  = static_cast<task2::u32>(pair.key >> 32);
+        task2::u32 right = static_cast<task2::u32>(pair.key & 0xffffffffu);
+
+        task2::u32 merged_token = static_cast<task2::u32>(m_vocabulary.size());
+        m_vocabulary.push_back(m_vocabulary[left] + m_vocabulary[right]);
+
+        #pragma omp parallel for
+        for(task2::u32 word_index = 0; word_index < m_words.size(); word_index++)
+        {
+            std::vector<task2::u32>& word = m_words[word_index];
+
+            std::vector<task2::u32> new_word;
+            new_word.reserve(word.size());
+
+            for(task2::u32 position = 0; position < word.size(); )
             {
                 if
                 (
@@ -280,11 +321,12 @@ struct Merge
     {
         while(true)
         {
-            //createPairs();
-            createPairsParallel();
+            createPairs();
+            //createPairsParallel();
             Pair best_pair;
             if(!selectBestPair(best_pair)) { break; }
-            mergePair(best_pair);
+            //mergePair(best_pair);
+            mergePairParallel(best_pair);
         }
     }
     //---------------------------------------------------------------------------------------//
