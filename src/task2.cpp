@@ -6,7 +6,8 @@
 
 #include "task2/task2_defs.h"
 #include "task2/task2_build_state.h"
-#include "task2/task2_run_merge_loop.h"
+// #include "task2/task2_run_merge_loop.h" // Abandoned
+#include "task2/task2_finalise.h"
 
 // Standard library.
 #include <algorithm>
@@ -32,8 +33,7 @@ namespace bpe
         //-----------------------------------------------------------------------------------//
         // Original build_state.
         //-----------------------------------------------------------------------------------//
-        /*
-        void build_state(const std::vector<CharSplit>& splits, task2::task2_state& state)
+        void build_state_orig(const std::vector<CharSplit>& splits, task2::task2_state& state)
         {
             if (splits.size() >= task2::no_position)
             {
@@ -146,14 +146,12 @@ namespace bpe
             state.right_stamp.assign(cache_size, task2::no_position);
             state.right_state.assign(cache_size, task2::no_position);
         }
-        */
         //-----------------------------------------------------------------------------------//
 
         //-----------------------------------------------------------------------------------//
         // Original run_merge_loop.
         //-----------------------------------------------------------------------------------//
-        /*
-        void run_merge_loop(task2::task2_state& state)
+        void run_merge_loop_orig(task2::task2_state& state)
         {
             task2::queue_heap queue;
             queue.comp.state = &state;
@@ -251,14 +249,12 @@ namespace bpe
                 push_born_states(state, queue);
             }
         }
-        */
         //-----------------------------------------------------------------------------------//
 
         //-----------------------------------------------------------------------------------//
         // Original finalize_results.
         //-----------------------------------------------------------------------------------//
-        /*
-        void finalize_results(const task2::task2_state& state, bpe::Results& results)
+        void finalize_results_orig(const task2::task2_state& state, bpe::Results& results)
         {
             std::vector<task2::u32> live_tokens;
             live_tokens.reserve(state.token_count.size());
@@ -294,100 +290,47 @@ namespace bpe
                 );
             }
         }
-        */
         //-----------------------------------------------------------------------------------//
-
-        //---------------------------------------------------------------------------------------//
-        void finalize_results(const Merge& merge, bpe::Results& results)
-        {
-            std::vector<task2::u64> token_count(merge.m_vocabulary.size(), 0);
-
-            //-----------------------------------------------------------------------------------//
-            // Calculate final token counts.
-            //-----------------------------------------------------------------------------------//
-            for(task2::u32 word = 0; word < merge.m_words.size(); word++)
-            {
-                for(task2::u32 token : merge.m_words[word])
-                {
-                    token_count[token] += merge.m_word_frequencies[word];
-                }
-            }
-            //-----------------------------------------------------------------------------------//
-
-            //-----------------------------------------------------------------------------------//
-            // Find tokens that actually occur.
-            //-----------------------------------------------------------------------------------//
-            std::vector<task2::u32> live_tokens;
-            live_tokens.reserve(token_count.size());
-
-            for(task2::u32 token_id = 0; token_id < token_count.size(); token_id++)
-            {
-                if(token_count[token_id] != 0)
-                {
-                    live_tokens.push_back(token_id);
-                }
-            }
-            //-----------------------------------------------------------------------------------//
-
-            //-----------------------------------------------------------------------------------//
-            // Sort by decreasing count, then lexicographically.
-            //-----------------------------------------------------------------------------------//
-            std::sort
-            (
-                live_tokens.begin(),
-                live_tokens.end(),
-                [&merge, &token_count](task2::u32 left, task2::u32 right)
-                {
-                    if(token_count[left] != token_count[right])
-                    {
-                        return token_count[left] > token_count[right];
-                    }
-
-                    return std::strcmp
-                    (
-                        merge.m_vocabulary[left].c_str(),
-                        merge.m_vocabulary[right].c_str()
-                    ) < 0;
-                }
-            );
-            //-----------------------------------------------------------------------------------//
-
-            //-----------------------------------------------------------------------------------//
-            // Create results.
-            //-----------------------------------------------------------------------------------//
-            results.tokens.clear();
-            results.tokens.reserve(live_tokens.size());
-
-            for(task2::u32 token_id : live_tokens)
-            {
-                const std::string& text = merge.m_vocabulary[token_id];
-
-                results.tokens.push_back
-                (
-                    bpe::TokenCount
-                    {
-                        std::vector<bpe::Byte>(text.begin(), text.end()),
-                        static_cast<std::size_t>(token_count[token_id])
-                    }
-                );
-            }
-            //-----------------------------------------------------------------------------------//
-        }
-        //---------------------------------------------------------------------------------------//
     }
 
     // task2: greedy BPE — repeatedly merge the most frequent adjacent pair.
     void task2(const std::vector<CharSplit>& splits, Results& results)
     {
+        //-----------------------------------------------------------------------------------//
+        // Build initial state from splits created in task1().
+        //-----------------------------------------------------------------------------------//
         task2::task2_state state;
 
+        //build_state_orig(splits, state);
         BuildState build_state;
         build_state.build_state(splits, state);
+        //-----------------------------------------------------------------------------------//
         
+        //-----------------------------------------------------------------------------------//
+        // Parallel implementation of merge loop abandoned due to peformance issues.
+        //-----------------------------------------------------------------------------------//
+        run_merge_loop_orig(state);
+        /*
         Merge merge(state);
-        merge.run();
+        while(true)
+        {
+            //merge.createPairs();
+            merge.createPairsParallel();
+            Pair best_pair;
+            if(!merge.selectBestPair(best_pair)) { break; }
+            merge.mergePair(best_pair);
+            //merge.mergePairParallel(best_pair);
+        }
+        */
+        //-----------------------------------------------------------------------------------//
 
-        finalize_results(merge, results);
+        //-----------------------------------------------------------------------------------//
+        // Sort tokens and store results in output.
+        //-----------------------------------------------------------------------------------//
+        //finalize_results_orig(state, results);
+        Finalise finalise;
+        finalise.finalise(state, results);
+        //-----------------------------------------------------------------------------------//
     }
 }
 // ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### //
